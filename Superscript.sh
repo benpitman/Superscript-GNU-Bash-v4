@@ -1,8 +1,8 @@
 #!/bin/bash
 
+mkdir /tmp/Superscript 2>/dev/null
 if ! ( [ -n "$1" ] && [[ "$1" == "-t" ]] ); then
     # Creates a copy of the script to tmp for it to be executed in a new terminal
-    mkdir /tmp/Superscript 2>/dev/null
     sed -n '11,$p' $0 >| /tmp/Superscript/superscript
     gnome-terminal --title "Superscript" --geometry 49x39+800+250 -e "bash /tmp/Superscript/superscript" 2>/dev/null
     exit
@@ -13,6 +13,7 @@ cleanup() {
     tput cvvis
     stty echo
     # rm -rf /tmp/Superscript 2>/dev/null
+    tput cup 39 49
 }
 trap cleanup EXIT
 
@@ -26,51 +27,142 @@ sprites() {
     sprite['boss2']='\e[1m\u2354\e[0m'      # ⍔
     sprite['explosion1']='\u2058'           # ⁘
     sprite['explosion2']='\u205b'           # ⁛
-    sprite['wall0']=' '                     # Null
     sprite['wall1']='\u2591'                # Light
     sprite['wall2']='\u2592'                # Medium
     sprite['wall3']='\u2593'                # Dark
     sprite['wall4']='\u2588'                # Full
 }
 
-destroy() {
-    if [ -n "$4" ]; then
-        tput cup $3 $4
-        printf "%$(( ${#words[$1]}+2 ))s"
-    fi
-    tput cup $3 $2
-    echo -en "${sprite[explosion1]}"
-    sleep 0.05
-    echo -en "\b${sprite[explosion2]}"
-    sleep 0.05
-    echo -en "\b "
-    if (( $1>-1 )); then
-        if [ -n "$word_focus" ]; then
-            (( $1<$word_focus )) && (( word_focus-- ))
-            (( $1==$word_focus )) && unset match stun word_focus
+game_over() {
+    while (( ${#words[@]}>0 )); do
+        destroy_enemy 1 0 ${enemy_row[0]} ${enemy_col[0]}
+        sleep 0.1
+    done
+    for (( dw=0; dw<47; dw++ )); do
+        if (( ${wall_log[$dw]}>0 )); then
+            destroy_wall $(( $dw+1 ))
+            score_modifier 1 $(( ${wall_log[$dw]}*100 ))
         fi
-        words=( ${words[@]:0:$1} ${words[@]:$(( $1+1 ))} )
-        enemy_col=( ${enemy_col[@]:0:$1} ${enemy_col[@]:$(( $1+1 ))} )
-        enemy_row=( ${enemy_row[@]:0:$1} ${enemy_row[@]:$(( $1+1 ))} )
+        sleep 0.02
+    done
+    exit
+    #TODO score screen with name and date
+}
+
+destroy_wall() {
+    tput cup 36 $1
+    printf "${sprite[explosion2]}"
+    sleep 0.05
+    printf "\b "
+}
+
+destroy_enemy() {
+    if (( $1 )); then
+        tput cup $3 $4
+        printf "%$(( ${#words[$2]}+2 ))s"
+    fi
+    d_col=$4
+    if (( $2>-1 )); then
+        (( ${print_left[$2]} )) && d_col=${used_cols[$2]}
+    fi
+    tput cup $3 $d_col
+    printf "${sprite[explosion1]}"
+    sleep 0.05
+    printf "\b${sprite[explosion2]}"
+    sleep 0.05
+    printf "\b "
+    if (( $2>-1 )); then
+        if [ -n "$word_focus" ]; then
+            if (( $2==$word_focus )); then
+                unset match stun word_focus
+            elif (( $2<$word_focus )); then
+                (( word_focus-- ))
+            fi
+        fi
+        words=( ${words[@]:0:$2} ${words[@]:$(( $2+1 ))} )
+        enemy_col=( ${enemy_col[@]:0:$2} ${enemy_col[@]:$(( $2+1 ))} )
+        enemy_row=( ${enemy_row[@]:0:$2} ${enemy_row[@]:$(( $2+1 ))} )
+        used_cols=( ${used_cols[@]:0:$2} ${used_cols[@]:$(( $2+1 ))} )
+        enemies=( ${enemies[@]:0:$2} ${enemies[@]:$(( $2+1 ))} )
+        print_left=( ${print_left[@]:0:$2} ${print_left[@]:$(( $2+1 ))} )
     fi
 }
 
+score_modifier() {
+    if (( $1 )); then
+        if (( $progress_bar>0 && $progress_bar%43==0 )); then
+            if (( $colour<7 )); then
+                (( colour++ ))
+                progress_bar=0
+            fi
+            (( score_mult++ ))
+        fi
+        (( progress_bar++ ))
+        (( overall_progress++ ))
+        if [ -z "$2" ]; then
+            read score <<< $( bc <<< "$score+($overall_progress*$score_mult)" )
+        else
+            read score <<< $( bc <<< "$score+$2" )
+        fi
+    else
+        progress_bar=0
+        overall_progress=0
+        colour=1
+        score_mult=1
+    fi
+    score_index=0
+    tput cup 38 1
+    for score_col in {1..43}; do
+        if (( ($score_col-1)<$progress_bar )); then
+            printf "${score_colours[$colour]}"
+            if (( $score_col>21-(${#score}/2) && $score_index<${#score} )); then
+                printf "\e[24m${score:$score_index:1}"
+                (( score_index++ ))
+            else
+                printf "\e[4m "
+            fi
+        else
+            printf "${score_colours[$(( colour-1 ))]}"
+            if (( $score_col>21-(${#score}/2) && $score_index<${#score} )); then
+                printf "\e[24m${score:$score_index:1}"
+                (( score_index++ ))
+            else
+                if (( $colour==1 )); then
+                    printf "\e[24m "
+                else
+                    printf "\e[4m "
+                fi
+            fi
+        fi
+    done
+    tput sgr0
+    (( $score_mult>1 )) && printf '%3sx' "$score_mult" || printf "    "
+}
+
 shoot() {
-    tput cup 35 $ref_col
-    echo -en " "
-    tput cup 35 $next_ref_col
-    echo -en "${sprite[ship]}"
-    ref_col=$next_ref_col
+    score_modifier 1
+    if [ -n "$2" ]; then
+        tput cup 35 $ref_col
+        printf " "
+        if (( ${print_left[$1]} )); then
+            ref_col=${used_cols[$1]}
+        else
+            ref_col=$2
+        fi
+        tput cup 35 $ref_col
+        printf "${sprite[ship]}"
+    fi
     tput cup 34 $ref_col
-    for (( p=34; p>${enemy_row[$1]}; p-- )); do
+    printf "${sprite[projectile]}"
+    for (( p=33; p>${enemy_row[$1]}; p-- )); do
         tput cup $p $ref_col
-        echo -en "${sprite[projectile]}"
+        printf "${sprite[projectile]}"
         tput cup $(( $p+1 )) $ref_col
-        echo -en " "
+        printf " "
         sleep 0.001
     done
     tput cup $(( $p+1 )) $ref_col
-    echo -en " "
+    printf " "
     word="\e[32;1m${words[$word_focus]:0:$match}\e[39m${words[$word_focus]:$match}\e[0m"
     draw_sprites 1 "$word"
 }
@@ -78,13 +170,13 @@ shoot() {
 draw_sprites() {
     if (( $new_level )); then
         tput cup 19 21
-        echo -en "\e[1mLEVEL $level\e[0m"
+        printf "\e[1mLEVEL $level\e[0m"
         sleep 2
         tput cup 19 21
-        echo -n "         "
-        tput cup 35 1
-        echo -n "                                               "
+        printf "         "
         new_level=0
+        # Clear input buffer
+        read -t0.0001 -n 10000 discard
     fi
     if (( $1 )); then
         for (( l=0; l<(${#words[@]}+1); l++ )); do
@@ -93,7 +185,13 @@ draw_sprites() {
                     word="$2"
                     l=$word_focus
                 else
-                    (( $l==$word_focus )) && continue
+                    if (( $l==$word_focus )); then
+                        if (( ${enemy_row[$l]}>1 && ${enemy_row[$l]}<36 )); then
+                            tput cup $(( ${enemy_row[$l]}-1 )) ${enemy_col[$l]}
+                            printf "%$(( ${#words[$l]}+2 ))s"
+                        fi
+                        continue
+                    fi
                     if (( $l==${#words[@]} )); then
                         l=$word_focus
                         word="\e[32;1m${words[$l]:0:$match}\e[39m${words[$l]:$match}\e[0m"
@@ -105,157 +203,197 @@ draw_sprites() {
                 (( $l==${#words[@]} )) && break
                 word=${words[$l]}
             fi
-            e_row=${enemy_row[$l]}
-            (( $e_row<1 )) && continue
-            e_col=${enemy_col[$l]}
             word_len=${#words[$l]}
+            pre_row=$(( ${enemy_row[$l]}-1 ))
+            (( ${enemy_row[$l]}<1 )) && continue
 
-            if (( $e_row==35 && ${enemy_col[$l]}==$ref_col )); then
-                destroy $l ${enemy_col[$l]} $(( $e_row-1 ))
-                destroy -1 $ref_col 35
-                read
-                exit
+            if (( ${enemy_row[$l]}==35 && ${used_cols[$l]}==$ref_col )); then
+                destroy_enemy 0 $l $pre_row ${enemy_col[$l]}
+                destroy_enemy 0 -1 35 $ref_col
+                game_over
             fi
 
-            if (( $e_row>35 )); then
-                wall_col=${enemy_col[$l]}
-                if (( ${wall_log[$wall_col]}>0 )); then
+            if (( ${enemy_row[$l]}>35 )); then
+                if (( ${print_left[$l]} )); then
+                    wall_col=${used_cols[$l]}
+                else
+                    wall_col=${enemy_col[$l]}
+                fi
+                wall_ind=$(( $wall_col-1 ))
+                if (( ${wall_log[$wall_ind]}>0 )); then
                     if (( $word_len<13 )); then
                         wall_kill=$(( ($word_len+2)/3 ))
                     else
                         wall_kill=4
                     fi
-                    (( wall_log[$wall_col]-=$wall_kill ))
-                    tput cup $e_row $wall_col
-                    echo -en "${sprite[wall${wall_log[$wall_col]}]}"
-                    destroy $l ${enemy_col[$l]} $(( $e_row-1 ))
+                    (( wall_log[$wall_ind]-=$wall_kill ))
+                    if (( ${wall_log[$wall_ind]}<1 )); then
+                        destroy_wall $wall_col
+                    else
+                        tput cup 36 $wall_col
+                        printf "${sprite[wall${wall_log[$wall_ind]}]}"
+                    fi
+                    destroy_enemy 0 $l $pre_row ${enemy_col[$l]}
                     (( l-- ))
                     continue
                 else
-                    tput cup $(( $e_row-1 )) $e_col
-                    echo -n " "
-                    (( $e_row==37 )) && { read; exit; } #TODO
+                    tput cup $pre_row ${enemy_col[$l]}
+                    printf " "
+                    (( ${enemy_row[$l]}==37 )) && game_over
                 fi
             fi
 
-            if (( $e_row>1 && $e_row<36 )); then
-                if (( $e_row==$highest )) || [ -z "$word_focus" ] || \
+            if (( ${enemy_row[$l]}>1 && ${enemy_row[$l]}<36 )); then
+                if [ -z "$word_focus" ] || \
                         ( [ -n "$word_focus" ] && (( $l!=$word_focus )) ); then
-                    tput cup $(( $e_row-1 )) 1
-                    echo -n "                                               "
+                    tput cup $pre_row ${enemy_col[$l]}
+                    printf "%$(( $word_len+2 ))s"
+                fi
+                if ! [[ " ${enemy_row[@]} " =~ " $pre_row " ]]; then
+                    tput cup $pre_row 1
+                    printf '                                               '
                 fi
             fi
-            if (( $word_len>(46-$e_col) )); then
-                (( e_col-=($word_len+1) ))
-                print_word=1
-                word+=" "
-            else
-                print_word=0
-                word=" $word"
-            fi
-            if (( $e_row>34 )); then
+
+            tput cup ${enemy_row[$l]} ${enemy_col[$l]}
+            if (( ${enemy_row[$l]}>34 )); then
                 unset word
-                (( print_word )) && (( e_col+=($word_len+1) ))
+                (( ${print_left[$l]} )) && tput cup ${enemy_row[$l]} ${used_cols[$l]}
             fi
-            tput cup $e_row $e_col
-            if (( $word_len<4 )); then
-                if (( $print_word )); then
-                    echo -en "$word${sprite[enemy1]}"
-                else
-                    echo -en "${sprite[enemy1]}$word"
-                fi
-            elif (( $word_len<7 )); then
-                if (( $print_word )); then
-                    echo -en "$word${sprite[enemy2]}"
-                else
-                    echo -en "${sprite[enemy2]}$word"
-                fi
-            elif (( $word_len<10 )); then
-                if (( $print_word )); then
-                    echo -en "$word${sprite[enemy3]}"
-                else
-                    echo -en "${sprite[enemy3]}$word"
-                fi
-            elif (( $word_len<13 )); then
-                if (( $print_word )); then
-                    echo -en "$word${sprite[boss1]}"
-                else
-                    echo -en "${sprite[boss1]}$word"
-                fi
-            elif (( $word_len>12 )); then
-                if (( $print_word )); then
-                    echo -en "$word${sprite[boss2]}"
-                else
-                    echo -en "${sprite[boss2]}$word"
+
+            if (( ${print_left[$l]} )); then
+                [ -n "$word" ] && printf "$word "
+                printf "${enemies[$l]}"
+            else
+                printf "${enemies[$l]}"
+                [ -n "$word" ] && printf " $word"
+            fi
+
+            if (( ${enemy_row[-1]}>1 && $RANDOM%3==0 )); then
+                if (( $word_len>9 && $word_len<13 )); then
+                    load_enemies 2
+                elif (( $word_len>12 )); then
+                    load_enemies 4
                 fi
             fi
+
             ( [ -n "$word_focus" ] && (( $l==$word_focus )) ) && break
         done
-        ( [ -n "$match" ] && (( $match==$word_len )) ) && destroy $word_focus ${enemy_col[$word_focus]} $e_row $e_col
+        if [ -n "$match" ] && (( $match==${#words[$word_focus]} )); then
+            destroy_enemy 1 $word_focus ${enemy_row[$word_focus]} ${enemy_col[$word_focus]}
+        fi
     fi
     [ -n "$2" ] && return
     tput cup 35 $ref_col
-    echo -en "${sprite[ship]}"
+    printf "${sprite[ship]}"
 }
 
 load_enemies() {
-    words=( $( sed -n "${level}p" "$text" ) )
-    used_cols="0"
-    e_row=0
-    for (( i=0; i<${#words[@]}; i++ )); do
-        if (( ${#words[$i]}>40 )); then
-            words=( ${words[@]:0:$i} ${words[@]:$(( $i+1 ))} )
+    if [ -z "$1" ]; then
+        used_cols=()
+        prov_words=( $( sed -n "${level}p" "$text" ) )
+    else
+        ally_len=$(( $RANDOM%$1+2 ))
+        line_max=$( wc -l < "${ally_len}_letters.txt" )
+        prov_words=( $(sed -n "$(( $RANDOM%$line_max+1 ))p" "${ally_len}_letters.txt") )
+    fi
+    for (( i=0, e_row=0; i<${#prov_words[@]}; i++, e_row-- )); do
+        word_len=${#prov_words[$i]}
+        if (( $word_len>40 )); then
+            prov_words=( ${prov_words[@]:0:$i} ${prov_words[@]:$(( $i+1 ))} )
             continue
         fi
-        enemy_row[$i]=$e_row
-        (( e_row-- ))
+
         while true; do
             e_col=$(( $RANDOM%46+1 ))
-            [[ " $used_cols " =~ " $e_col " ]] || break
+            [[ " ${used_cols[@]} " =~ " $e_col " ]] || break
         done
-        enemy_col[$i]=$e_col
-        used_cols+=" $e_col"
+        if (( $word_len>(46-$e_col) )); then
+            enemy_col+=( $(( e_col-($word_len+1) )) )
+            print_left+=( 1 )
+        else
+            enemy_col+=( $e_col )
+            print_left+=( 0 )
+        fi
+        used_cols+=( $e_col )
+        enemy_row+=( $e_row )
+
+        if (( $word_len<4 )); then
+            enemies+=( "${sprite[enemy1]}" )
+        elif (( $word_len<7 )); then
+            enemies+=( "${sprite[enemy2]}" )
+        elif (( $word_len<10 )); then
+            enemies+=( "${sprite[enemy3]}" )
+        elif (( $word_len<13 )); then
+            enemies+=( "${sprite[boss1]}" )
+        elif (( $word_len>12 )); then
+            enemies+=( "${sprite[boss2]}" )
+        fi
+        words+=( "${prov_words[$i]}" )
     done
-    highest=$e_row
 }
 
 game_loop() {
     while true; do
+        # If there are no words left, level up
         if (( ${#words[@]}==0 )); then
             (( level++ ))
             new_level=1
-            (( $speed>2 )) && speed=$( printf '%02d' $(( speed-=2 )) )
+            # Increase speed
+            (( $speed>20 )) && (( speed-- ))
             load_enemies
         fi
         draw_sprites $draw_enemies
         pre_time=$( date '+%2N' | sed 's/^0//' )
-        read -sn1 -t0.$(( $speed-$time_taken )) key
-        if (( $?!=142 )); then
-            [[ "$key" == $'\e' ]] && exit
-            # Clear input buffer
-            # read -t 0.0001 -n 10000 discard
+        read -sn1 -t0.$(( $speed-$time_taken )) key1
+        read_pid=$?
+        read -sn1 -t0.0001 key2
+        read -sn1 -t0.0001 key3
+        if (( $read_pid!=142 )); then
+            hit=0
+            if [[ "$key1" == $'\e' ]]; then
+                [ -z "$key2" ] && exit || hit=1
+            fi
+            key=$( tr 'A-Z' 'a-z' <<< "$key1" )
+            [[ "$key" == "" ]] && hit=1
             if [ -z "$word_focus" ]; then
                 for (( w=0; w<${#words[@]}; w++ )); do
                     if (( ${enemy_row[$w]}>0 && ${enemy_row[$w]}<35 )); then
-                        if [[ "$key" == "${words[$w]:0:1}" ]]; then
-                            next_ref_col=${enemy_col[$w]}
-                            match=1
-                            word_focus=$w
-                            stun=$w
-                            shoot $w
-                            break
+                        lower_word=$( tr 'A-Z' 'a-z' <<< "${words[$w]}" )
+                        line_of_sight=1
+                        if [[ "$key" == "${lower_word:0:1}" ]]; then
+                            los_row=${enemy_row[$w]}
+                            los_col=${enemy_col[$w]}
+                            for (( los_word=0; los_word<${#words[@]}; los_word++ )); do
+                                (( $los_word==$w )) && continue
+                                if (( ${enemy_col[$los_word]}==$los_col && \
+                                        ${enemy_row[$los_word]}>$los_row )); then
+                                    line_of_sight=0
+                                    break
+                                fi
+                            done
+                            if (( $line_of_sight )); then
+                                hit=1
+                                match=1
+                                word_focus=$w
+                                stun=$w
+                                shoot $w ${enemy_col[$w]}
+                                break
+                            fi
                         fi
                     fi
                 done
             else
+                lower_word=$( tr 'A-Z' 'a-z' <<< "${words[$word_focus]}" )
                 if [[ "$key" == "${words[$word_focus]:$match:1}" ]]; then
+                    hit=1
                     (( match++ ))
                     stun=$word_focus
                     shoot $word_focus
                 fi
             fi
+            (( $hit )) || score_modifier 0
         fi
-        speed=$( sed 's/^0*//' <<< $speed )
         post_time=$( date '+%2N' | sed 's/^0//' )
         (( $post_time<$pre_time )) && (( post_time+=100 ))
         if (( $time_taken )); then
@@ -266,13 +404,13 @@ game_loop() {
         if (( $time_taken<$speed )); then
             draw_enemies=0
         else
-            highest=36
             for (( s=0; s<${#words[@]}; s++ )); do
-                ( [ -n "$stun" ] && [[ "${words[$s]}" == "${words[$stun]}" ]] ) && continue
+                if [ -n "$stun" ] && [[ "${words[$s]}" == "${words[$stun]}" ]]; then
+                    unset stun
+                    continue
+                fi
                 (( enemy_row[$s]++ ))
-                (( ${enemy_row[$s]}<$highest )) && highest=${enemy_row[$s]}
             done
-            unset stun
             draw_enemies=1
             time_taken=0
         fi
@@ -280,29 +418,40 @@ game_loop() {
 }
 
 new_game() {
+    # Set blank game variables to allow restarting
     text=/tmp/Superscript/text
-    tr '[A-Z]' '[a-z]' < "$text_file" | tr '.' '\n' | \
-            sed 's/[^([:alnum:]| )]//g;/^ *$/d' >| "$text"
+    # Format text file to allow each line to be built into an array
+    tr '.' '\n' < "$text_file" | sed -r 's/(-|—)/ /;s/[^([:alnum:]| )]//g;/^ *$/d' >| "$text"
     clear_map 37
     tput cup 36 1
+    # Build wall
     wall_log=()
     for (( b=0; b<47; b++ )); do
-        echo -en "${sprite[wall0]}"
-        wall_log+=( 0 )
+        printf "${sprite[wall4]}"
+        wall_log+=( 4 )
     done
-    level=1
-    tput cup 19 21
-    echo -en "\e[1mLEVEL $level\e[0m"
-    sleep 2
-    tput cup 19 21
-    echo -n "         "
-    new_level=0
-    speed=60
+    # Set level to 0 and then instantly level up
+    level=0
+    new_level=1
+    speed=61
     ref_col=24
+    # Set draw enemies to numeric true
     draw_enemies=1
+    # Reset time
     time_taken=0
-    load_enemies
+    score=0
+    # Rainbow from red to purple
+    score_colours=( '\e[0m' '\e[38;5;160m' '\e[38;5;202m' '\e[38;5;214m' \
+        '\e[38;5;76m' '\e[38;5;86m' '\e[38;5;27m' '\e[38;5;129m' )
+    colour=1
+    score_mult=1
+    progress_bar=0
+    overall_progress=0
     game_loop
+}
+
+show_scores() {
+    return
 }
 
 set_text() {
@@ -316,7 +465,7 @@ clear_map() {
     for (( b=1; b<$1; b++ )); do
         echo '│                                               │'
     done
-    echo -n '└───────────────────────────────────────────────┘'
+    printf '└───────────────────────────────────────────────┘'
     tput civis
 }
 
@@ -328,9 +477,9 @@ main_menu() {
     tput cup 2 18
     echo "Ben  Pitman's"
     tput cup 4 14
-    echo -e '\e[1mS U P E R S C R I P T\e[0m'
+    printf '\e[1mS U P E R S C R I P T\e[0m'
     tput cup 10 20
-    echo -e '\e[1mCONTROLS\e[0m'
+    printf '\e[1mCONTROLS\e[0m'
     tput cup 14 11
     echo 'Ctrl-C       -       Quit'
     selected=3
@@ -338,7 +487,7 @@ main_menu() {
     hs_log=/home/$USER/.superscript_highscore
     [ -s "$hs_log" ] || echo "0" >| $hs_log
     high_score=$( < $hs_log )
-    text_file=~/text.txt
+    text_file=text.txt
     tput civis  # Disable cursor blinker
     while true; do
         case $selected in
@@ -356,13 +505,14 @@ main_menu() {
             ${TEXT:='CHOOSE TEXT'} \
             ${QUIT:='QUIT'}
         tput cup 18 22
-        echo -e "$START"
+        printf "$START"
         tput cup 20 19
-        echo -e "$SCORES"
+        printf "$SCORES"
         tput cup 22 19
-        echo -e "$TEXT"
+        printf "$TEXT"
         tput cup 24 22
-        echo -e "$QUIT"
+        printf "$QUIT"
+        # Get user input and control keys
         read -sn1 key1
         read -sn1 -t 0.0001 key2
         read -sn1 -t 0.0001 key3
@@ -381,8 +531,9 @@ main_menu() {
     done
 }
 
+# Populate sprite array
 declare -A sprite
 sprites
 
-stty -echo
+stty -echo # Disable echo
 main_menu
