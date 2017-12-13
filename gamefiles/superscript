@@ -1,0 +1,71 @@
+#!/bin/bash
+
+home_dir=/tmp/Superscript
+
+function Show_Help {
+    # Display horizontal line
+    seq -s- $(( $( tput cols ) + 1 )) | tr -d '[0-9]'
+    cat << ____HELP
+Usage: ${0##*/} [-h] [-g] [-x]...
+Runs the game in the current terminal window by default
+
+        -h      displays this help text and exits
+
+        -g      plays the game in a new gnome-terminal window
+
+        -u      uninstalls the game
+
+        -x      runs in debug mode
+                all output it sent to /tmp/Superscript/debug.log
+
+NOTES:
+        Any errors that show up, please report the contents of
+        /var/games/superscript/error to me at my GitHub page.
+        If the bug is persistent and throws no errors, please use the '-x'
+        option and report the contents of /var/games/superscript/debug instead.
+
+Copyright © Ben Pitman
+____HELP
+    seq -s- $(( $( tput cols ) + 1 )) | tr -d '[0-9]'
+    exit 0
+}
+
+function uninstall {
+    sudo -k
+    printf "Your password is required to uninstall this game.
+            \rLeave blank to cancel uninstall."
+    while read -rsp $'\n> ' PASS; do
+        [ -z "$PASS" ] && exit 0
+        ( echo "$PASS" | sudo -Svp '' ) && break
+    done
+    sudo rm -r /usr/local/lib/superscript /var/games/superscript
+    sudo rm /usr/local/bin/superscript-game /usr/local/bin/superscript
+    printf 'Uninstallation complete\n'
+    exit 0
+}
+
+graphical_mode=false
+debug_mode=false
+while getopts ":h :g :u :x" arg; do
+    case $arg in
+        h)  Show_Help;;
+        g)  graphical_mode=true;;
+        u)  uninstall;;
+        x)  debug_mode=true;;
+        \?) printf "Invalid option -$OPTARG\n";;
+    esac
+done
+
+if $graphical_mode; then
+    if ! hash gnome-terminal 2>/dev/null; then
+        printf 'gnome-terminal is not installed'
+        exit 1
+    fi
+    gnome-terminal                  \
+        --title "Superscript"       \
+        --geometry 49x39+800+250 -e \
+        "bash superscript-game $graphical_mode $debug_mode" 2>/dev/null
+else
+    bash superscript-game "$graphical_mode" "$debug_mode"
+fi
+exit 0

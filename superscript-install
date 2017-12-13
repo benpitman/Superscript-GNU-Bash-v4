@@ -1,0 +1,104 @@
+#!/bin/bash
+
+bash_version=$( bash --version | grep -Po 'bash, version \K[0-9]' )
+if (( $bash_version < 4 )); then
+    printf "Incorrect bash version. Please upgrade to 4 or above."
+    exit 1
+fi
+
+printf "Your password is required to install this game.
+        \rLeave blank to cancel install.\n"
+while true; do
+    read -sp '> ' PASS
+    [ -z "$PASS" ] && exit 0
+    if $( echo "$PASS" | sudo -Svp '' ); then
+        break
+    fi
+done
+
+# Install gnome-terminal
+if ! hash gnome-terminal 2>/dev/null; then
+    printf  "Superscript is most compatible in terminals that can display
+            \rdouble-width unicode characters, such as gnome-terminal.
+            \rWithout it, the option '-g' cannot be used.
+            \rAccessed with the '-g' option or an executable shortcut.
+            \rWould you like to install it now?\n"
+    while read -rp 'Y/N> ' install_gt; do
+        if [[ "$install_gt" == [Yy] ]]; then
+            if hash apt 2>/dev/null; then
+                sudo apt-get -yq install gnome-terminal || exit $?
+            elif hash yum 2>/dev/null; then
+                sudo yum -yq install gnome-terminal || exit $?
+            fi
+            printf "gnome-terminal installed\n"
+            break
+        elif [[ "$install_gt" == [Nn] ]]; then
+            break
+        fi
+    done
+fi
+
+game_dir='/usr/local/bin'
+lib_dir='/usr/local/lib/superscript'
+log_dir='/var/games/superscript'
+hs_dir='/var/games/superscript/highscores'
+current=$( dirname "$( readlink -f "$0" )" )
+
+if [[ "$USER" == "root" ]]; then
+    printf 'root cannot own log files, please enter a username for'
+    id -u user
+
+mkdir "$lib_dir" "$log_dir" "$hs_dir" 2>/dev/null
+sudo chown -R $USER: "$lib_dir" "$log_dir"
+cp -rp "$current"/allies "$lib_dir"
+cp -rp "$current"/texts "$lib_dir"
+cp -rp "$current"/icons "$lib_dir"
+sudo cp "$current"/gamefiles/* "$game_dir"
+
+sudo chmod 755 "$game_dir"/superscript
+
+printf "\nSuperscript installed.\n\n"
+
+if hash gnome-terminal 2>/dev/null; then
+    printf "Would you like an application shortcut?\n"
+    while read -rp 'Y/N> ' shortcut; do
+        [[ "$shortcut" == [Yy] ]] && break
+        [[ "$shortcut" == [Nn] ]] && exit 0
+    done
+else
+    exit 0
+fi
+
+selected=1
+tput civis
+while true; do
+    if (( $selected )); then
+        icon_name="square"
+        SQUARE='\e[7mSQUARE\e[0m'
+        CIRCLE='CIRCLE'
+    else
+        icon_name="circle"
+        SQUARE='SQUARE'
+        CIRCLE='\e[7mCIRCLE\e[0m'
+    fi
+    printf "\r\e[0m$SQUARE or $CIRCLE icon? (use arrow keys)"
+    read -sn1 key1
+    read -sn1 -t 0.0001 key2
+    read -sn1 -t 0.0001 key3
+    [[ "$key3" == [CD] ]] && (( selected ^= 1 ))
+    [ -z "$key1" ] && break
+done
+tput cvvis
+
+cat <<'LAUNCHER' | sudo tee /usr/share/applications/superscript.desktop 1>/dev/null
+[Desktop Entry]
+Type=Application
+Terminal=false
+Name=Superscript
+Icon=$lib_dir/icons/superscript_icon_$icon_name.png
+Exec=superscript -g
+LAUNCHER
+
+shortcut_file="/home/$USER/Desktop/Superscript"
+sudo cp -p /usr/share/applications/superscript.desktop "$shortcut_file"
+sudo chmod a+x "$shortcut_file"

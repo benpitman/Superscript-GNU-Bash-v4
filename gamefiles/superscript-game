@@ -1,0 +1,1149 @@
+#!/bin/bash +m
+
+: <<'Superscript_Doc'
+    @Param      bool    1
+        True if script is to be run in terminal mode
+    @Param      bool    2
+        True if script is to be run in debug mode
+Superscript_Doc
+
+[ -z "$1" ] && exit 1
+
+# If game is loaded on a terminal outside of a GUI environment
+if ! $1 && ( [ -z "$DISPLAY" ] || [[ "$TERM" == "linux" ]] ); then
+    in_cli=true
+else
+    in_cli=false
+fi
+
+log_dir=/var/games/superscript
+# Debug mode sends STDERR to an error file
+if $2; then
+    export PS4='+(${LINENO}) ${FUNCNAME[0]}(): '
+    set -x
+    exec 2>$log_dir/debug
+else
+    exec 2>$log_dir/error
+fi
+
+function Cleanup {
+    # tput clear
+    tput cvvis
+    stty echo
+    tput cup 39 49
+}
+trap Cleanup EXIT
+
+function Load_Sprites {
+    sprite['ship']='\e[1m\u23c5\e[0m'       # ⏅
+    sprite['projectile']='\u0027'           # '
+    sprite['enemy1']='\e[1m\u25bf\e[0m'     # ▿
+    sprite['enemy2']='\u2352'               # ⍒
+    sprite['enemy3']='\u236b'               # ⍫
+    sprite['boss1']='\e[1m\u2362\e[0m'      # ⍢
+    sprite['boss2']='\e[1m\u2354\e[0m'      # ⍔
+    sprite['explosion1']='\u2058'           # ⁘
+    sprite['explosion2']='\u205b'           # ⁛
+    sprite['wall1']='\u2582'                # 1/4
+    sprite['wall2']='\u2584'                # 1/2
+    sprite['wall3']='\u2586'                # 3/4
+    sprite['wall4']='\u2588'                # Full
+}
+
+: <<'Print_Score_Doc'
+    @Param      int     1
+        Row to print next highscore
+    @Param      int     2
+        Number associated to the highscore
+    @Param      string  3
+        Highscore username
+    @Param      string  4
+        Highscore value
+Print_Score_Doc
+
+function Print_Score {
+    local           \
+        b           \
+        hr_score    \
+        pad         \
+        spacer
+    # Make the score human readable
+    for (( b=${#4}; b>0; b-- )); do
+        (( ($b < ${#4}) && ($b % 3 == 0) )) && hr_score+=","
+        hr_score+="${4: -b:1}"
+    done
+    tput cup $1 6
+    pad=$(( 33 - (${#3} + ${#hr_score}) ))
+    eval printf -v spacer '%.0s.' {1..$pad}
+    (( $editable_index == ($2 - 1) )) && printf '\e[1m'
+    printf '%-3s%s%s%s\e[0m' "$2" "$3" "$spacer" "$hr_score"
+}
+
+function Game_Over {
+    local               \
+        discard         \
+        dw              \
+        editable_row    \
+        ln              \
+        next_score      \
+        score_row       \
+        score_shown     \
+        usernames=()    \
+        userscores=()
+
+    # Destroy player then all remaining enemies
+    Destroy_Entity -1 true
+    while (( ${#words[@]} )); do
+        Destroy_Entity 0 true
+        sleep 0.1
+    done
+
+    # Iterate through any standing walls and destroy them
+    for (( dw=0; dw<47; dw++ )); do
+        if (( ${wall_log[$dw]} > 0 )); then
+            Destroy_Wall $(( $dw + 1 ))
+            Score_Modifier true $(( ${wall_log[$dw]} * 10 ))
+        fi
+        sleep 0.02
+    done
+    Clear_Map 38
+    tput cup 3 19
+    printf '\e[1mHIGHSCORES\e[0m'
+
+    if [ -s "$text_file" ]; then
+        hs_log="$log_dir/highscores/$( basename "$text_file" ".txt" | tr [A-Z] [a-z] )"
+        touch "$hs_log"
+    fi
+    score_shown=false
+    num_scores=$( wc -l < "$hs_log" )
+    for (( ln=0; ln<=$num_scores; ln++ )); do
+        line_index=$(( $ln + 1 ))
+        score_ln=$( sed -n "${line_index}p" "$hs_log" )
+        userscores[$ln]=${score_ln/*\,/}
+        usernames[$ln]=${score_ln/\,*/}
+        if ! $score_shown && ( (( ${userscores[$ln]} <= $score )) || \
+                (( $ln == $num_scores )) ); then
+            score_shown=true
+            editable_index=$ln
+        fi
+    done
+    # Insert current score into the arrays
+    usernames=(
+        ${usernames[@]:0:$editable_index}
+        ""
+        ${usernames[@]:$editable_index}
+    )
+    userscores=(
+        ${userscores[@]:0:$editable_index}
+        $score
+        ${userscores[@]:$editable_index}
+    )
+
+    score_row=7
+    # Because array starts at 1, use <=
+    for (( next_score=0; next_score<${#userscores[@]}; next_score++ )); do
+        tput cup $score_row 6
+        if (( $next_score < 20 )); then
+            (( $next_score == $editable_index )) && editable_row=$score_row
+            Print_Score $score_row $(( $next_score + 1 )) \
+                "${usernames[$next_score]}" ${userscores[$next_score]}
+        elif (( $editable_index > 19 )); then
+            editable_row=30
+            Print_Score $editable_row $(( $editable_index + 1 )) \
+                "" $score
+        else
+            break
+        fi
+        (( score_row++ ))
+    done
+
+    tput cup $editable_row 9
+    # Turn echo back on for text input
+    stty echo
+    tput cvvis
+    printf '\e[1m'
+    read -n 10000 -t 0.0001 discard
+    # Username entry to a max of 8 characters
+    # Clear IFS to avoid whitespace treated as null
+    while IFS= read -sn1 key; do
+        if [ -z "$key" ]; then
+            if (( ${#playername} )); then
+                break
+            else
+                tput cup $editable_row 9
+            fi
+        # If backspace character is pressed, remove last entry
+        elif [[ "$key" == $'\177' ]]; then
+            if (( ${#playername} )); then
+                printf '\b.\b'
+                playername=${playername:0: -1}
+            fi
+        elif (( ${#playername} > 7 )); then
+            continue
+        elif [[ "$key" == [\ _] ]]; then
+            # Replace spaces with underscores
+            printf '_'
+            playername+="_"
+        elif [[ "$key" == [[:punct:]] ]]; then
+            # Disallow punctuation
+            continue
+        elif [[ "$key" == [[:alnum:]] ]]; then
+            printf "$key"
+            playername+="$key"
+        fi
+    done
+    printf '\e[0m'
+    tput civis
+    stty -echo
+    # Add the new score to the highscores file
+    if (( $editable_index == $num_scores )); then
+        printf "$playername,$score\n" >> "$hs_log"
+    else
+        sed -i "$(( $editable_index + 1 ))s/^/$playername\,$score\n/" "$hs_log"
+    fi
+    exit
+    #TODO highscores need to be specific to the game file
+}
+
+function Destroy_Wall {
+    tput cup 36 $1
+    printf "${sprite[explosion2]}"
+    sleep 0.05
+    printf "\b "
+}
+
+: <<'Destroy_Entity_Doc'
+    @Param      int     1
+        Index of enemy to be removed
+        -1 if player
+    @Param      bool    2
+        True if explosion is required
+Destroy_Entity_Doc
+
+function Destroy_Entity {
+    local d_col d_row
+    if (( $1 > -1 )); then
+        if (( ${enemy_row[$1]} < $player_row )); then
+            tput cup ${enemy_row[$1]} ${word_col[$1]}
+            printf "%$(( ${#words[$1]} + 2 ))s"
+        fi
+        d_row=${enemy_row[$1]}
+        d_col=${enemy_col[$1]}
+    else
+        d_row=$player_row
+        d_col=$player_col
+    fi
+    tput cup $d_row $d_col
+
+    if $2; then
+        printf "${sprite[explosion1]}"
+        sleep 0.05
+        printf "\b${sprite[explosion2]}"
+        sleep 0.05
+        printf "\b "
+    else
+        printf " "
+    fi
+    if (( $1 > -1 )); then
+        if [ -n "$word_focus" ]; then
+            # If targeted word is deleted, unset associated variables
+            if (( $1 == $word_focus )); then
+                unset match stun word_focus
+            # Otherwise reassign the target to the index of the previous word
+            else
+                (( word_focus-- ))
+            fi
+        fi
+        # Remove entity from all arrays
+        words=( ${words[@]:0:$1} ${words[@]:$(( $1 + 1 ))} )
+        word_col=( ${word_col[@]:0:$1} ${word_col[@]:$(( $1 + 1 ))} )
+        enemy_row=( ${enemy_row[@]:0:$1} ${enemy_row[@]:$(( $1 + 1 ))} )
+        enemy_col=( ${enemy_col[@]:0:$1} ${enemy_col[@]:$(( $1 + 1 ))} )
+        enemies=( ${enemies[@]:0:$1} ${enemies[@]:$(( $1 + 1 ))} )
+        print_left=( ${print_left[@]:0:$1} ${print_left[@]:$(( $1 + 1 ))} )
+    fi
+}
+
+: <<'Score_Modifier_Doc'
+    @Param      bool    1
+        If true, increase the score
+        If false, reset the progress bar to zero
+Score_Modifier_Doc
+
+function Score_Modifier {
+    local               \
+        score_col       \
+        score_equation  \
+        score_index
+    if $1; then
+        # If progress bar is full, reset it and increase multiplier and colour
+        if (( $progress_bar == 43 )); then
+            if (( $colour < 7 )); then
+                (( colour++ ))
+                progress_bar=0
+            fi
+            (( score_mult++ ))
+        fi
+        (( progress_bar++ ))
+        (( overall_progress++ ))
+        if [ -z "$2" ]; then
+            score_equation="$score + ($overall_progress * $score_mult)"
+        else
+            score_equation="$score + $2"
+        fi
+        if hash bc 2>/dev/null; then
+            # bc is used in case the score gets higher than a 64 bit integer
+            read score <<< "$( bc <<< "$score_equation" )"
+        # Fallback if bc is not installed
+        else
+            score=$(( $score_equation ))
+        fi
+    else
+        progress_bar=0
+        overall_progress=0
+        colour=1
+        score_mult=1
+    fi
+    score_index=0
+    tput cup 38 1
+    # Draw the progress bar
+    for score_col in {1..43}; do
+        if (( ($score_col - 1) < $progress_bar )); then
+            printf "${score_colours[$colour]}"
+            if (( $score_col > (21 - (${#score} / 2)) && $score_index < ${#score} )); then
+                printf "${score:$score_index:1}"
+                (( score_index++ ))
+            else
+                printf "─"
+            fi
+        else
+            printf "${score_colours[$(( colour - 1 ))]}"
+            if (( $score_col > (21 - (${#score} / 2)) && $score_index < ${#score} )); then
+                printf "\e[24m${score:$score_index:1}"
+                (( score_index++ ))
+            else
+                if (( $colour == 1 )); then
+                    printf " "
+                else
+                    printf "─"
+                fi
+            fi
+        fi
+    done
+    tput sgr0
+    (( $score_mult > 1 )) && printf '%3sx' "$score_mult" || printf "    "
+}
+
+: <<'Shoot_Doc'
+    @Param      bool    1
+        If true, reposition player
+Shoot_Doc
+
+function Shoot {
+    local p
+    Score_Modifier true
+    if $1; then
+        tput cup $player_row $player_col
+        printf " "
+        if (( ${print_left[$2]} )); then
+            player_col=${enemy_col[$2]}
+        else
+            player_col=${word_col[$2]}
+        fi
+        tput cup $player_row $player_col
+        printf "${sprite[ship]}"
+    fi
+    tput cup 34 $player_col
+    printf "${sprite[projectile]}"
+    for (( p=33; p>${enemy_row[$2]}; p-- )); do
+        tput cup $p $player_col
+        printf "${sprite[projectile]}"
+        tput cup $(( $p + 1 )) $player_col
+        printf " "
+        sleep 0.001
+    done
+    tput cup $(( $p + 1 )) $player_col
+    printf " "
+    Draw_Target
+    if (( $match == ${#words[$word_focus]} )); then
+        Destroy_Entity $word_focus true
+    fi
+}
+
+function Target {
+    word_focus=$(( ${#words[@]} - 1 ))
+
+    # Move focussed word to the end of all arays
+    words=( ${words[@]:0:$1} ${words[@]:$(( $1 + 1 ))} ${words[$1]} )
+    word_col=( ${word_col[@]:0:$1} ${word_col[@]:$(( $1 + 1 ))} ${word_col[$1]} )
+    enemy_row=( ${enemy_row[@]:0:$1} ${enemy_row[@]:$(( $1 + 1 ))} ${enemy_row[$1]} )
+    enemy_col=( ${enemy_col[@]:0:$1} ${enemy_col[@]:$(( $1 + 1 ))} ${enemy_col[$1]} )
+    enemies=( ${enemies[@]:0:$1} ${enemies[@]:$(( $1 + 1 ))} ${enemies[$1]} )
+    print_left=( ${print_left[@]:0:$1} ${print_left[@]:$(( $1 + 1 ))} ${print_left[$1]} )
+}
+
+function Draw_Target {
+    local word_len=${#words[$word_focus]}
+
+    # Set word with matched characters in green
+    word="\e[32;1m${words[$word_focus]:0:$match}\e[39m${words[$word_focus]:$match}\e[0m"
+
+    if (( ${enemy_row[$word_focus]} == $player_row )); then
+        # Disallow printing of the word on the same row as the player
+        unset word
+        # Align to ship ..
+        tput cup ${enemy_row[$word_focus]} ${enemy_col[$word_focus]}
+    else
+        # .. else align to word
+        tput cup ${enemy_row[$word_focus]} ${word_col[$word_focus]}
+    fi
+
+    # Re-print the targeted word and enemy
+    if (( ${print_left[$word_focus]} )); then
+        [ -n "$word" ] && printf "$word "
+        printf "${enemies[$word_focus]}"
+    else
+        printf "${enemies[$word_focus]}"
+        [ -n "$word" ] && printf " $word"
+    fi
+}
+
+function Draw_All {
+    local               \
+        next_row        \
+        wall_capacity   \
+        wall_col        \
+        wall_ind        \
+        wall_kill       \
+        word            \
+        word_len
+
+    if [ -n "$word_focus" ]; then
+        tput cup ${enemy_row[$word_focus]} ${word_col[$word_focus]}
+        printf "%$(( ${#words[$word_focus]} + 2 ))s"
+    fi
+    for (( l=0; l<${#words[@]}; l++ )); do
+
+        # Save word length to avoid accessing array
+        word_len=${#words[$l]}
+
+        # If all enemies are on the screen, load allies randomly
+        if (( ${enemy_row[-1]} > 1 && ($RANDOM % 3) == 0 )); then
+            # If word is between 10 and 12 letters long
+            if (( $word_len > 9 && $word_len < 13 )); then
+                # Load a new enemy 2 characters long
+                Load_Enemies true 2
+            # If word is greater than 12 letters long
+            elif (( $word_len > 12 )); then
+                Load_Enemies true 4
+            fi
+        fi
+
+        # Predict next row unless the enemy has been stunned
+        if [ -n "$stun" ] && (( $l == $stun )); then
+            unset stun
+            next_row=${enemy_row[$l]}
+        else
+            next_row=$(( ${enemy_row[$l]} + 1 ))
+        fi
+
+        # If entity is not on the screen, go to next loop
+        if (( $next_row < 1 )); then
+            enemy_row[$l]=$next_row
+            continue
+        fi
+
+        # If an enemy passes through the wall, game over
+        if (( $next_row == 37 )); then
+            Destroy_Entity $l false
+            Game_Over
+        fi
+
+        # If an enemy collides with the player, game over
+        if (( $next_row == $player_row && ${enemy_col[$l]} == $player_col )); then
+            # Destroy the colliding enemy, only explosion needed
+            Destroy_Entity $l true
+            Game_Over
+        fi
+
+        if (( $next_row > 35 )); then
+            wall_col=${enemy_col[$l]}
+            # Wall starts at column 1, so deduct one for zero start array
+            wall_ind=$(( $wall_col - 1 ))
+            wall_capacity=${wall_log[$wall_ind]}
+            if (( $wall_capacity > 0 )); then
+                # Destroy fraction of the wall dependent on word length
+                if (( $word_len < 13 )); then
+                    wall_kill=$(( ($word_len + 2) / 3 ))
+                else
+                    wall_kill=4
+                fi
+                (( wall_capacity -= $wall_kill ))
+                wall_log[$wall_ind]=$wall_capacity
+                # If a wall has been damaged enough, destroy it
+                if (( $wall_capacity < 1 )); then
+                    Destroy_Wall $wall_col
+                # Else redraw it
+                else
+                    tput cup 36 $wall_col
+                    printf "${sprite[wall$wall_capacity]}"
+                fi
+                Destroy_Entity $l true
+                # Compensate for missing word
+                (( l-- ))
+                continue
+            else
+                tput cup ${enemy_row[$l]} ${enemy_col[$l]}
+                printf " "
+            fi
+        fi
+
+        # Update saved positions
+        enemy_row[$l]=$next_row
+
+        # If targeted, draw separately
+        if [ -n "$word_focus" ] && (( $l == $word_focus )); then
+            Draw_Target
+            return
+        else
+            # Set the printable word
+            word=${words[$l]}
+        fi
+
+        if (( $next_row > 1 && $next_row < 36 )) ; then
+            tput cup $(( ${enemy_row[$l]} - 1 )) ${word_col[$l]}
+            printf "%$(( $word_len + 2 ))s"
+        fi
+
+        if (( $next_row > 34 )); then
+            # Disallow printing of the word on the same row as the player
+            unset word
+            # Align to ship ..
+            tput cup $next_row ${enemy_col[$l]}
+        else
+            # .. otherwise align to word
+            tput cup $next_row ${word_col[$l]}
+        fi
+
+        # Print word and enemy in correct order
+        if (( ${print_left[$l]} )); then
+            [ -n "$word" ] && printf "$word "
+            printf "${enemies[$l]}"
+        else
+            printf "${enemies[$l]}"
+            [ -n "$word" ] && printf " $word"
+        fi
+    done
+}
+
+function Set_Default_Text {
+    local                                           \
+        new_word                                    \
+        num_allies=$( ls $lib_dir/allies | wc -l )  \
+        offset=$(( $level + 3 ))                    \
+        r_index                                     \
+        r_total=0                                   \
+        r_seq_total=0                               \
+        rarity=()                                   \
+        random_cent                                 \
+        random_line                                 \
+        word_file                                   \
+        word_limit=$(( $level + 4 ))
+
+    # Dissipate a percentage chance over the word files from high to low
+    for (( i=$offset; i>($offset - $num_allies); i--)); do
+        if (( $i > 0 )); then
+            rarity+=( $(( ((i * 100) / $offset) )) )
+            (( r_total += ${rarity[@]: -1} ))
+        else
+            rarity+=( 0 )
+        fi
+    done
+
+    # Ratio all percentages under their total
+    for (( r_index=0; r_index<${#rarity[@]}; r_index++ )); do
+        if (( ${rarity[$r_index]} > 0 )); then
+            cent=$(( (${rarity[r_index]} * 100) / $r_total ))
+            rarity[$r_index]=$(( $cent + $r_seq_total ))
+            (( r_seq_total += $cent ))
+        fi
+    done
+
+    # Add new words based on their percentage likelihood
+    for (( new_word=0; new_word<$word_limit; new_word++ )); do
+        random_cent=$(( ($RANDOM % $r_seq_total) + 1 ))
+        for (( choose=0; choose<${#rarity[@]}; choose++ )); do
+            if (( $random_cent < ${rarity[choose]} )); then
+                word_file="$lib_dir/allies/$(( $choose + 2 ))_letters.txt"
+                break
+            fi
+        done
+        random_line=$(( ($RANDOM % $( wc -l < "$word_file" ) ) + 1 ))
+        prov_words+=( $( sed -n "${random_line}p" < "$word_file" ) )
+    done
+}
+
+: <<'Load_Enemies_Doc'
+    @Param      bool    1
+        True if only loading one new enemy
+    @Param      int     2
+        Length of new enemy
+Load_Enemies_Doc
+
+function Load_Enemies {
+    local           \
+        e_col       \
+        e_row       \
+        line_max    \
+        prov_words  \
+        word_len
+
+    # Add new enemies up to 47 (playable screen width)
+    if $1; then
+        if (( ${#enemies[@]} < 47 )); then
+            ally_len=$(( ($RANDOM % $2) + 2 ))
+            line_max=$( wc -l < "$lib_dir/allies/${ally_len}_letters.txt" )
+            prov_words=(
+                $( sed -n "$(( ($RANDOM % $line_max) + 1 ))p" \
+                "$lib_dir/allies/${ally_len}_letters.txt" )
+            )
+        else
+            return
+        fi
+    else
+        enemy_col=()
+        if [ -s "$text_file" ]; then
+            prov_words=( $( sed -n "${level}p" "$text" ) )
+        else
+            Set_Default_Text
+        fi
+        if (( ${#prov_words} > 47 )); then
+            # Remove all words after index 46
+            eval unset prov_words[{47..${#prov_words[@]}}]
+        fi
+    fi
+
+    for (( i=0, e_row=0; i<${#prov_words[@]}; i++, e_row-- )); do
+        word_len=${#prov_words[$i]}
+        # If word is longer than 40 characters, delete it and move on
+        if (( $word_len > 40 )); then
+            prov_words=( ${prov_words[@]:0:$i} ${prov_words[@]:$(( $i + 1 ))} )
+            continue
+        fi
+
+        while e_col=$(( ($RANDOM % 46) + 1 )); do
+            [[ " ${enemy_col[@]} " =~ " $e_col " ]] || break
+        done
+        # If word bleeds over the border, set printing before the ship
+        if (( $word_len > (46 - $e_col) )); then
+            word_col+=( $(( $e_col - ($word_len + 1) )) )
+            print_left+=( 1 )
+        else
+            word_col+=( $e_col )
+            print_left+=( 0 )
+        fi
+        # Coordinates for ship
+        enemy_col+=( $e_col )
+        enemy_row+=( $e_row )
+
+        if (( $word_len < 4 )); then
+            enemies+=( "${sprite[enemy1]}" )
+        elif (( $word_len < 7 )); then
+            enemies+=( "${sprite[enemy2]}" )
+        elif (( $word_len < 10 )); then
+            enemies+=( "${sprite[enemy3]}" )
+        elif (( $word_len < 13 )); then
+            enemies+=( "${sprite[boss1]}" )
+        elif (( $word_len > 12 )); then
+            enemies+=( "${sprite[boss2]}" )
+        fi
+        words+=( "${prov_words[$i]}" )
+    done
+    tput cup $player_row $player_col
+    printf "${sprite[ship]}"
+}
+
+function Game_Loop {
+    local           \
+        discard     \
+        hit         \
+        key         \
+        key1        \
+        key2        \
+        key3        \
+        lower_word  \
+        post_time   \
+        pre_time    \
+        unpause
+
+    while true; do
+        # If there are no words left, level up
+        if (( ${#words[@]} == 0 )); then
+            (( level++ ))
+            tput cup 19 21
+            printf "\e[1mLEVEL $level\e[0m"
+            sleep 2
+            tput cup 19 21
+            printf "         "
+            new_level=false
+            # Clear input buffer
+            read -t 0.0001 -n 10000 discard
+            # Increase speed
+            speed=$(( 60 - ($level * 2) ))
+            (( $speed < 12 )) && speed=12
+            Load_Enemies false
+        fi
+        # Draw enemies if loop was not interrupted with key input
+        $draw_enemies && Draw_All
+        pre_time=$( date '+%2N' | sed 's/^0//' )
+        read -rsn1 -t0.$(( $speed - $time_taken )) key1
+        read_pid=$?
+        read -rsn1 -t0.0001 key2
+        read -rsn1 -t0.0001 key3
+
+        # If read timeout was interrupted
+        if (( $read_pid != 142 )); then
+            hit=false
+            # If enter or space is pressed, consider as hit and ignore
+            if [ -z "$key1" ] || [[ "$key1" == " " ]]; then
+                hit=true
+            # If escape is pressed
+            elif [[ "$key1" == $'\e' ]]; then
+                if [ -z "$key2" ]; then
+                    # Basic pause screen
+                    tput cup 18 21
+                    printf '\e[1m PAUSE \e[0m'
+                    while read -rsn1 unpause; do
+                        [[ "$unpause" == $'\e' ]] && break
+                    done
+                    tput cup 18 21
+                    printf '%7s' ''
+                fi
+                hit=true
+            elif [[ "$key1" =~ ^[a-Z]$ ]]; then
+                key=$( tr 'A-Z' 'a-z' <<< "$key1" )
+                if [ -z "$word_focus" ] && ! $hit; then
+                    # Loop through all words on screen
+                    for (( w=0; w<${#words[@]}; w++ )); do
+                        if (( ${enemy_row[$w]} > 0 && ${enemy_row[$w]} < 35 )); then
+                            lower_word=$( tr 'A-Z' 'a-z' <<< "${words[$w]}" )
+                            # line_of_sight=1
+                            # True if key pressed matches the first character
+                            if [[ "$key" == "${lower_word:0:1}" ]]; then
+                                # los_row=${enemy_row[$w]}
+                                # los_col=${word_col[$w]}
+                                # for (( los_word=0; los_word<${#words[@]}; los_word++ )); do
+                                #     (( $los_word==$w )) && continue
+                                #     if (( ${word_col[$los_word]}==$los_col && \
+                                #             ${enemy_row[$los_word]}>$los_row )); then
+                                #         line_of_sight=0
+                                #         break
+                                #     fi
+                                # done
+                                # if (( $line_of_sight )); then
+                                    hit=true
+                                    match=1
+                                    Target "$w"
+                                    stun=$word_focus
+                                    Shoot true $word_focus
+                                    break
+                                # fi
+                            fi
+                        fi
+                    done
+                elif [ -n "$word_focus" ]; then
+                    lower_word=$( tr 'A-Z' 'a-z' <<< "${words[$word_focus]}" )
+                    if [[ "$key" == "${lower_word:$match:1}" ]]; then
+                        hit=true
+                        (( match++ ))
+                        stun=$word_focus
+                        Shoot false $word_focus
+                    fi
+                fi
+            fi
+            # If no hit is made, reset score
+            $hit || Score_Modifier false
+        fi
+        post_time=$( date '+%2N' | sed 's/^0//' )
+        (( $post_time < $pre_time )) && (( post_time += 100 ))
+        if (( $time_taken )); then
+            (( time_taken += ($post_time - $pre_time) ))
+        else
+            time_taken=$(( $post_time - $pre_time ))
+        fi
+        if (( $time_taken < $speed )); then
+            draw_enemies=false
+        else
+            draw_enemies=true
+            time_taken=0
+        fi
+    done
+}
+
+# Set blank global variables to allow restarting
+function New_Game {
+    if [ -s "$text_file" ]; then
+        text=$lib_dir/texts/plaintext
+        # Format text file to allow each line to be built into an array
+        tr '.' '\n' < "$text_file" | sed -r 's/(-|—)/ /;s/[^([:alnum:]| )]//g;/^ *$/d' >| "$text"
+    fi
+    Clear_Map 37
+    # Build wall at full width of the playable area
+    wall_log=( $( printf '%.0s4 ' {0..46} ) )
+    tput cup 36 1
+    printf "%.0s${sprite[wall4]}" {0..46}
+    # Set level to 0 and then instantly level up
+    level=0
+    # Player starting position
+    player_row=35
+    player_col=24
+    # Draw enemies upon load
+    draw_enemies=true
+    # Reset time
+    time_taken=0
+    score=0
+    if $in_cli; then
+        # If Debian
+        if hash apt 2>/dev/null; then
+            # Default, red, yellow, green, turquoise, blue, purple, pink
+            score_colours=(
+                '\e[0m'
+                '\e[38;5;160m'
+                '\e[38;5;178m'
+                '\e[38;5;76m'
+                '\e[38;5;43m'
+                '\e[38;5;27m'
+                '\e[38;5;128m'
+                '\e[38;5;205m'
+            )
+        # If Red Hat, colours have to be simplified
+        elif hash yum 2>/dev/null; then
+            # Default, red, orange, green, turquoise, blue, purple, white
+            score_colours=(
+                '\e[0m'
+                '\e[31m'
+                '\e[33m'
+                '\e[32m'
+                '\e[36m'
+                '\e[34m'
+                '\e[35m'
+                '\e[97m'
+            )
+        fi
+    else
+        # Default, red, orange, yellow, green, turquoise, blue, purple
+        score_colours=(
+            '\e[0m'
+            '\e[38;5;160m'
+            '\e[38;5;166m'
+            '\e[38;5;178m'
+            '\e[38;5;76m'
+            '\e[38;5;43m'
+            '\e[38;5;27m'
+            '\e[38;5;128m'
+        )
+    fi
+    if "$in_cli"; then
+        score_colours=( ${score_colours[@]:0:2} ${score_colours[@]:3} )
+        score_colours+=( '\e[38;5;205m' )
+    fi
+    score=0
+    Score_Modifier false
+    Game_Loop
+}
+
+####    Menu system    ####
+
+function Show_Scores {
+    local score
+    Clear_Map $1
+    tput cup 4 19
+    printf '\e[1mHigh Scores\e[0m'
+    line_num=7
+    while read -r score; do
+        score_name=$( cut -d\  -f1 <<< "$score" )
+        score_value=$(  cut -d\  -f2 <<< "$score" )
+        # Half of terminal width minus the score name
+        tput cup $line_num $(( 24 - (${#score_name} + 1) ))
+        printf "$score_name - $score_value"
+        (( line_num++ ))
+    done < "$hs_log"
+}
+
+function Sub_Menu {
+    Clear_Map 38
+    tput cup 4 21
+    printf '\e[1mOptions\e[0m'
+    option_list=( "Change Extension" "Show Hidden Files" )
+    while true; do
+        read
+    done
+}
+
+# Similar to Clear_Map in function, but localised to the file structure
+function Clear_List {
+    local clean
+    for (( clean=6; $clean<38; clean++ )); do
+        tput cup $clean 8
+        printf '%33s' ''
+    done
+}
+
+function File_Select {
+    Clear_Map 38
+    unset text_file
+    local                               \
+        change_dir=true                 \
+        contents                        \
+        current_directory="/home/$USER" \
+        ext_bash='.*\.[Tt][Xx][Tt]$'    \
+        ext_grep='(.txt|\/)$'           \
+        file_row                        \
+        highlighted_line                \
+        item                            \
+        item_colour                     \
+        item_limit                      \
+        item_selected                   \
+        key1                            \
+        key2                            \
+        key3                            \
+        line_count                      \
+        max_items                       \
+        new_primary_index               \
+        parent_colour                   \
+        parent_exists                   \
+        primary_index=1                 \
+        show_hidden=''                  \
+        trail
+    local extension=$ext_bash
+
+    tput cup 4 10
+    printf '\e[1mPlease choose a text file\e[0m'
+    while [ -z "$text_file" ]; do
+        # If in a new directory, clear the screen and update the variables
+        if "$change_dir"; then
+            [ -n "$file_row" ] && Clear_List
+            # Pull directory contents if they are a folder or text file
+            contents="$( ls -p "$show_hidden" "$current_directory" 2>/dev/null \
+                    | grep -Pi $ext_grep )"
+            # contents="$( ls -p "$current_directory" 2>/dev/null )"
+            # Always highlight first entry, if exists, not parent
+            if [ -z "$contents" ]; then
+                item_selected=0
+                highlighted_line=0
+                max_items=0
+            else
+                item_selected=1
+                highlighted_line=1
+                max_items=$( wc -l <<< "$contents" )
+            fi
+            primary_index=1
+            change_dir=false
+        fi
+
+        # If there is a parent, then show "../"
+        if [[ "$current_directory" != "/" ]]; then
+            tput cup 6 8
+            parent_colour="\e[1;34m"
+            (( $item_selected )) || parent_colour="\e[7;1;34m"
+            printf "$parent_colour..\e[0m/"
+            parent_exists=0
+        else
+            # If not, disallow highlighting
+            parent_exists=1
+        fi
+
+        file_row=7
+        line_count=1
+        while read -r item; do
+            if [[ "$item" =~ .*/$ ]]; then
+                item=${item:0:-1}
+                item_colour="\e[1;34m"
+                trail="/"
+            elif [[ "$item" =~ $extension ]]; then
+            # else
+                item_colour=""
+                trail=""
+            else
+                continue
+            fi
+            tput cup $(( file_row++ )) 8
+            (( $highlighted_line == $line_count )) && printf "\e[7m"
+            item_limit=$(( ${#item} > 32 ? 32 : ${#item} ))
+            line_limit=$(( $item_limit == 33 ? 0 : (33 - $item_limit) ))
+            printf "$item_colour%-${item_limit}s\e[0m%-${line_limit}s" "${item:0:32}" "$trail"
+            (( line_count++ ))
+
+        done < <( sed -n "${primary_index},$(( $primary_index + 28 ))p"  <<< "$contents" )
+
+        # Take key input
+        read -rsn1 key1
+        read -rsn1 -t0.0001 key2
+        read -rsn1 -t0.0001 key3
+
+        case $key3 in
+            A)  if (( ($parent_exists && $item_selected == 1) \
+                        || ($parent_exists == 0 && $item_selected == 0) )); then
+                    item_selected=$max_items
+                    highlighted_line=$max_items
+                else
+                    (( item_selected-- ))
+                    (( highlighted_line-- ))
+                fi;; #Up
+            B)  if (( $item_selected == $max_items )); then
+                    item_selected=$parent_exists
+                    highlighted_line=$parent_exists
+                else
+                    (( item_selected++ ))
+                    (( highlighted_line++ ))
+                fi;; # Down
+            D)  if [[ "$current_directory" != "/" ]]; then
+                    unset key1
+                    item_selected=0
+                    highlighted_line=0
+                fi;; # Left: set up to go to parent
+        esac
+
+        # Calculate where in the list to start printing
+        if (( $max_items > 29 )); then
+            if (( $item_selected < 15 )); then
+                new_primary_index=1
+            elif (( $item_selected < ($max_items - 14) )); then
+                new_primary_index=$(( $item_selected - 14 ))
+            elif (( $item_selected <= $max_items )); then
+                new_primary_index=$(( $max_items - 28 ))
+            # else
+            #     new_primary_index=$primary_index
+            fi
+            if (( $new_primary_index != $primary_index )); then
+                if (( $new_primary_index > $primary_index && $highlighted_line != $max_items )); then
+                    (( highlighted_line-- ))
+                elif (( $new_primary_index < $primary_index && $highlighted_line != 0 )); then
+                    (( highlighted_line++ ))
+                fi
+                primary_index=$new_primary_index
+            fi
+        fi
+
+        (( $highlighted_line == $max_items && $max_items > 29 )) && highlighted_line=29
+
+        # If user presses enter or the right arrow key
+        if [ -z "$key1" ] || [[ "$key3" == "C" ]]; then
+            if (( $item_selected )); then
+                chosen_item="$( sed -n "${item_selected}p" <<< "$contents" )"
+                # If chosen item is a directory, then open it
+                if [[ "$chosen_item" =~ .*/$ ]]; then
+                    current_directory="$current_directory/$chosen_item"
+                    change_dir=true
+                fi
+            elif [[ "$current_directory" != "/" ]]; then
+                # Go to parent
+                current_directory="$( dirname "$current_directory" )"
+                parent_exists=0
+                change_dir=true
+            fi
+        fi
+
+        if ( [[ "$key1" == $'\e' ]] && [ -z "$key2" -a -z "$key3" ] ); then
+            Sub_Menu
+        fi
+        unset key1 key2 key3
+    done
+
+    #TODO sub menu
+    #TODO hidden files
+    #TODO specific file extensions
+    #TODO save replacement text file
+}
+
+: <<'Clear_Map_Doc'
+    @Param      bool     1
+        Amount of rows to clear
+Clear_Map_Doc
+
+function Clear_Map {
+    # Clear the screen
+    #TODO fix this rubbish
+    # if $1; then
+    #     printf "\033[2J\033[0;0H"
+    # else
+        tput reset
+    # fi
+    local b
+    echo '┌───────────────────────────────────────────────┐'
+    for (( b=1; b<$1; b++ )); do
+        echo '│                                               │'
+    done
+    printf '└───────────────────────────────────────────────┘'
+    tput civis
+}
+
+function Main_Menu {
+    # Clear screen
+    tput clear
+    # Display the main menu
+    Clear_Map 38
+    tput cup 2 18
+    echo "Ben  Pitman's"
+    tput cup 4 14
+    printf '\e[1mS U P E R S C R I P T\e[0m'
+    tput cup 10 20
+    printf '\e[1mCONTROLS\e[0m'
+    tput cup 14 11
+    echo 'Ctrl-C       -       Quit'
+}
+
+# Populate sprite array
+declare -A sprite
+Load_Sprites
+
+stty -echo # Disable echo
+hs_log="$log_dir/highscores/default"
+touch "$hs_log" # Create score log if doesn't exist
+lib_dir="/usr/local/lib/superscript"
+tput civis  # Disable cursor blinker
+selected=3 # Default menu select
+
+# Selection menu outside a function to refresh the main upon return
+while true; do
+    Main_Menu
+    case $selected in
+        *)  unset START SCORES TEXT QUIT;;&
+        3)  START='\e[1;36mSTART\e[0m'
+            redirect="New_Game";;
+        2)  TEXT='\e[1;36mCHOOSE TEXT\e[0m'
+            redirect="File_Select";;
+        1)  SCORES='\e[1;36mHIGH SCORES\e[0m'
+            redirect="Show_Scores 38";;
+        0)  QUIT='\e[1;36mQUIT\e[0m';;
+    esac
+    set ${START:='START'}           \
+        ${TEXT:='CHOOSE TEXT'}      \
+        ${SCORES:='HIGH SCORES'}    \
+        ${QUIT:='QUIT'}
+    tput cup 18 22
+    printf "$START"
+    tput cup 20 19
+    printf "$TEXT"
+    tput cup 22 19
+    printf "$SCORES"
+    tput cup 24 22
+    printf "$QUIT"
+    # Get user input and control keys
+    read -rsn1 key1
+    read -rsn1 -t 0.0001 key2
+    read -rsn1 -t 0.0001 key3
+    if [[ "$key3" == "A" ]]; then
+        (( $selected == 3 )) && selected=0 || (( selected++ )) # Up
+    elif [[ "$key3" == "B" ]]; then
+        (( $selected == 0 )) && selected=3 || (( selected-- )) # Down
+    fi
+    if [ -z "$key1" ]; then
+        if (( $selected )); then
+            $redirect
+        else
+            exit
+        fi
+    fi
+    unset key1 key2 key3
+done
