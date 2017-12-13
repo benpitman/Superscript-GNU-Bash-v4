@@ -45,8 +45,17 @@ hs_dir='/var/games/superscript/highscores'
 current=$( dirname "$( readlink -f "$0" )" )
 
 if [[ "$USER" == "root" ]]; then
-    printf 'root cannot own log files, please enter a username for'
-    id -u user
+    printf 'root cannot own log files, please enter a home user.
+            \rLeave blank to cancel.\n'
+    while read -rp "> " user; do
+        [ -z "$user" ] && exit 0
+        if id -u $user 2>/dev/null; then
+            break
+        else
+            printf 'User does not exist\n'
+        fi
+    done
+fi
 
 mkdir "$lib_dir" "$log_dir" "$hs_dir" 2>/dev/null
 sudo chown -R $USER: "$lib_dir" "$log_dir"
