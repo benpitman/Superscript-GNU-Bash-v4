@@ -44,6 +44,99 @@ function uninstall {
     exit 0
 }
 
+function Check_Terminal_Size {
+
+    (( $( tput cols ) > 48 && $( tput lines ) > 38 )) && return
+
+    local               \
+        max_width=48    \
+        max_height=38
+
+    printf  'Your terminal is not large enough\n'
+    if hash resize 2>/dev/null; then
+        printf 'Would you like to resize it automatically?\n'
+        while read -rp 'Y/N> ' term_resize; do
+            if [[ "$term_resize" == [Yy] ]]; then
+                resize -s 39 49 &>/dev/null
+                return
+            elif [[ "$term_resize" == [Nn] ]]; then
+                break
+            fi
+        done
+    fi
+
+    printf 'Please resize the window to the following grid\n'
+    read -rsp "Press enter to continue, and again to refresh or finish"
+    tput civis
+    until (( $( tput cols ) > $max_width && $( tput lines ) > $max_height )); do
+        term_width=$(( $( tput cols ) - 1 ))
+        # term_height=$(( $( tput lines ) - 1 ))
+        box_width=$(( $max_width > $term_width ? $term_width : $max_width ))
+        # box_height=$(( $max_height > $term_height ? $term_height : $max_height ))
+        tput clear
+        tput cup 0 0
+        for y in $( seq 0 $max_height ); do
+            for x in $( seq 0 $box_width ); do
+                if (( $y == 0 )); then
+                    if (( $x == 0 )); then
+                        printf '\u250c' # ┌
+                    elif (( $x == ($max_width / 2) )); then
+                        printf '\u252c' # ┬
+                    elif (( $x == $max_width )); then
+                        printf '\u2510' # ┐
+                    else
+                        printf '\u2500' # ─
+                    fi
+                elif (( $y == ($max_height / 2) )); then
+                    if (( $x == 0 )); then
+                        printf '\u251c' # ├
+                    elif (( $x == ($max_width / 2) )); then
+                        printf '\u253c' # ┼
+                    elif (( $x == $max_width )); then
+                        printf '\u2524' # ┤
+                    else
+                        printf '\u2500' # ─
+                    fi
+                elif (( $y == $max_height )); then
+                    if (( $x == 0 )); then
+                        printf '\u2514' # └
+                    elif (( $x == ($max_width / 2) )); then
+                        printf '\u2534' # ┴
+                    elif (( $x == $max_width )); then
+                        printf '\u2518' # ┘
+                    else
+                        printf '\u2500' # ─
+                    fi
+                elif (( $x == 0 || $x == ($max_width / 2) || $x == $max_width )); then
+                    printf '\u2502' # │
+                else
+                    printf ' '
+                fi
+                #
+                #     if (( $x == ($max_width / 2) )); then
+                #         printf '+'
+                #     elif (( $x == 0 || $x == $max_width )); then
+                #         printf '|'
+                #     else
+                #         printf '-'
+                #     fi
+                # elif (( $x == ( $max_width / 2 ) )); then
+                #     if (( $y == 0 || $y == $max_height )); then
+                #         printf '-'
+                #     else
+                #         printf '|'
+                #     fi
+                # else
+                #     printf ' '
+                # fi
+            done
+            (( $y != $max_height )) && echo
+        done
+        read -s
+    done
+    tput cvvis
+}
+
 graphical_mode=false
 debug_mode=false
 while getopts ":h :g :u :x" arg; do
@@ -64,8 +157,9 @@ if $graphical_mode; then
     gnome-terminal                  \
         --title "Superscript"       \
         --geometry 49x39+800+250 -e \
-        "bash superscript-game $graphical_mode $debug_mode" 2>/dev/null
+        "bash /home/alek/Git/Superscript-GNU-Bash-v4/gamefiles/superscript-game $graphical_mode $debug_mode" 2>/dev/null
 else
-    bash superscript-game "$graphical_mode" "$debug_mode"
+    Check_Terminal_Size
+    bash /home/alek/Git/Superscript-GNU-Bash-v4/gamefiles/superscript-game "$graphical_mode" "$debug_mode"
 fi
 exit 0

@@ -57,7 +57,7 @@ if [[ "$USER" == "root" ]]; then
     done
 fi
 
-mkdir "$lib_dir" "$log_dir" "$hs_dir" 2>/dev/null
+sudo mkdir "$lib_dir" "$log_dir" "$hs_dir" 2>/dev/null
 sudo chown -R $USER: "$lib_dir" "$log_dir"
 cp -rp "$current"/allies "$lib_dir"
 cp -rp "$current"/texts "$lib_dir"
@@ -65,6 +65,8 @@ cp -rp "$current"/icons "$lib_dir"
 sudo cp "$current"/gamefiles/* "$game_dir"
 
 sudo chmod 755 "$game_dir"/superscript
+
+printf 'txt,false,false' > "$log_dir/superscript/settings.txt"
 
 printf "\nSuperscript installed.\n\n"
 
@@ -111,3 +113,5 @@ LAUNCHER
 shortcut_file="/home/$USER/Desktop/Superscript"
 sudo cp -p /usr/share/applications/superscript.desktop "$shortcut_file"
 sudo chmod a+x "$shortcut_file"
+
+printf '\nDone\n'

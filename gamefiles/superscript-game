@@ -10,10 +10,15 @@ Superscript_Doc
 [ -z "$1" ] && exit 1
 
 # If game is loaded on a terminal outside of a GUI environment
-if ! $1 && ( [ -z "$DISPLAY" ] || [[ "$TERM" == "linux" ]] ); then
-    in_cli=true
+if $1; then
+    in_tty=false
 else
-    in_cli=false
+    if ( [ -z "$DISPLAY" ] || [[ "$TERM" == "linux" ]] ); then
+        in_cli=true
+    else
+        in_cli=false
+    fi
+    in_tty=true
 fi
 
 log_dir=/var/games/superscript
@@ -21,16 +26,18 @@ log_dir=/var/games/superscript
 if $2; then
     export PS4='+(${LINENO}) ${FUNCNAME[0]}(): '
     set -x
-    exec 2>$log_dir/debug
+    exec 2>$log_dir/debug.log
 else
-    exec 2>$log_dir/error
+    exec 2>$log_dir/error.log
 fi
 
 function Cleanup {
-    # tput clear
+    [ -s "$hs_log" ] || rm "$hs_log"
     tput cvvis
     stty echo
+    # Go to bottom right corner and print a new line
     tput cup 39 49
+    echo
 }
 trap Cleanup EXIT
 
@@ -50,42 +57,17 @@ function Load_Sprites {
     sprite['wall4']='\u2588'                # Full
 }
 
-: <<'Print_Score_Doc'
-    @Param      int     1
-        Row to print next highscore
-    @Param      int     2
-        Number associated to the highscore
-    @Param      string  3
-        Highscore username
-    @Param      string  4
-        Highscore value
-Print_Score_Doc
-
-function Print_Score {
-    local           \
-        b           \
-        hr_score    \
-        pad         \
-        spacer
-    # Make the score human readable
-    for (( b=${#4}; b>0; b-- )); do
-        (( ($b < ${#4}) && ($b % 3 == 0) )) && hr_score+=","
-        hr_score+="${4: -b:1}"
-    done
-    tput cup $1 6
-    pad=$(( 33 - (${#3} + ${#hr_score}) ))
-    eval printf -v spacer '%.0s.' {1..$pad}
-    (( $editable_index == ($2 - 1) )) && printf '\e[1m'
-    printf '%-3s%s%s%s\e[0m' "$2" "$3" "$spacer" "$hr_score"
-}
-
 function Game_Over {
     local               \
-        discard         \
         dw              \
+        editable_index  \
         editable_row    \
+        end_choose=0    \
+        end_game        \
         ln              \
         next_score      \
+        num_scores      \
+        playername      \
         score_row       \
         score_shown     \
         usernames=()    \
@@ -106,14 +88,14 @@ function Game_Over {
         fi
         sleep 0.02
     done
+
     Clear_Map 38
     tput cup 3 19
     printf '\e[1mHIGHSCORES\e[0m'
 
-    if [ -s "$text_file" ]; then
-        hs_log="$log_dir/highscores/$( basename "$text_file" ".txt" | tr [A-Z] [a-z] )"
-        touch "$hs_log"
-    fi
+    tput cup 5 $(( 24 - (${#hs_name} / 2) ))
+    printf "$hs_name"
+
     score_shown=false
     num_scores=$( wc -l < "$hs_log" )
     for (( ln=0; ln<=$num_scores; ln++ )); do
@@ -127,6 +109,7 @@ function Game_Over {
             editable_index=$ln
         fi
     done
+
     # Insert current score into the arrays
     usernames=(
         ${usernames[@]:0:$editable_index}
@@ -139,8 +122,7 @@ function Game_Over {
         ${userscores[@]:$editable_index}
     )
 
-    score_row=7
-    # Because array starts at 1, use <=
+    score_row=8
     for (( next_score=0; next_score<${#userscores[@]}; next_score++ )); do
         tput cup $score_row 6
         if (( $next_score < 20 )); then
@@ -149,6 +131,7 @@ function Game_Over {
                 "${usernames[$next_score]}" ${userscores[$next_score]}
         elif (( $editable_index > 19 )); then
             editable_row=30
+            printf '\e[1m'
             Print_Score $editable_row $(( $editable_index + 1 )) \
                 "" $score
         else
@@ -157,52 +140,49 @@ function Game_Over {
         (( score_row++ ))
     done
 
-    tput cup $editable_row 9
-    # Turn echo back on for text input
-    stty echo
-    tput cvvis
-    printf '\e[1m'
-    read -n 10000 -t 0.0001 discard
-    # Username entry to a max of 8 characters
-    # Clear IFS to avoid whitespace treated as null
-    while IFS= read -sn1 key; do
-        if [ -z "$key" ]; then
-            if (( ${#playername} )); then
-                break
-            else
-                tput cup $editable_row 9
-            fi
-        # If backspace character is pressed, remove last entry
-        elif [[ "$key" == $'\177' ]]; then
-            if (( ${#playername} )); then
-                printf '\b.\b'
-                playername=${playername:0: -1}
-            fi
-        elif (( ${#playername} > 7 )); then
-            continue
-        elif [[ "$key" == [\ _] ]]; then
-            # Replace spaces with underscores
-            printf '_'
-            playername+="_"
-        elif [[ "$key" == [[:punct:]] ]]; then
-            # Disallow punctuation
-            continue
-        elif [[ "$key" == [[:alnum:]] ]]; then
-            printf "$key"
-            playername+="$key"
-        fi
-    done
-    printf '\e[0m'
-    tput civis
-    stty -echo
+    Text_Entry $editable_row 9 8 "." "playername"
+
     # Add the new score to the highscores file
-    if (( $editable_index == $num_scores )); then
+    if (( $editable_index == $( wc -l < "$hs_log" ) )); then
         printf "$playername,$score\n" >> "$hs_log"
     else
         sed -i "$(( $editable_index + 1 ))s/^/$playername\,$score\n/" "$hs_log"
     fi
-    exit
-    #TODO highscores need to be specific to the game file
+
+    while true; do
+        end_game=(
+            'REPLAY'
+            'MAIN MENU'
+            'QUIT'
+        )
+        end_game[$end_choose]="\e[7m${end_game[$end_choose]}\e[0m"
+        tput cup 34 16
+        printf "${end_game[0]}  ${end_game[1]}"
+        tput cup 36 22
+        printf "${end_game[2]}"
+
+        IFS= read -rsn1 key1
+        read -rsn1 -t0.0001 key2
+        read -rsn1 -t0.0001 key3
+
+        case $key3 in
+            [CD])   (( $end_choose < 2 )) && (( end_choose ^= 1 ));;
+            "B")    if (( $end_choose < 2 )); then
+                        prev_end=$end_choose
+                        end_choose=2
+                    fi;;
+            "A")    (( $end_choose == 2 )) && end_choose=$prev_end;;
+        esac
+
+        if [ -z "$key1" ]; then
+            case $end_choose in
+                0)  return 2;;
+                1)  return 3;;
+                2)  exit;;
+            esac
+        fi
+        unset key1 key2 key3
+    done
 }
 
 function Destroy_Wall {
@@ -457,6 +437,7 @@ function Draw_All {
         if (( $next_row == 37 )); then
             Destroy_Entity $l false
             Game_Over
+            return $?
         fi
 
         # If an enemy collides with the player, game over
@@ -464,6 +445,7 @@ function Draw_All {
             # Destroy the colliding enemy, only explosion needed
             Destroy_Entity $l true
             Game_Over
+            return $?
         fi
 
         if (( $next_row > 35 )); then
@@ -613,7 +595,11 @@ function Load_Enemies {
     else
         enemy_col=()
         if [ -s "$text_file" ]; then
-            prov_words=( $( sed -n "${level}p" "$text" ) )
+            prov_words=( $( sed -n "${level}p" "$text_file" ) )
+            if (( ${#prov_words[@]} == 0 )); then
+                Game_Over
+                return $?
+            fi
         else
             Set_Default_Text
         fi
@@ -625,8 +611,8 @@ function Load_Enemies {
 
     for (( i=0, e_row=0; i<${#prov_words[@]}; i++, e_row-- )); do
         word_len=${#prov_words[$i]}
-        # If word is longer than 40 characters, delete it and move on
-        if (( $word_len > 40 )); then
+        # If word is longer than 20 characters, delete it and move on
+        if (( $word_len > 20 )); then
             prov_words=( ${prov_words[@]:0:$i} ${prov_words[@]:$(( $i + 1 ))} )
             continue
         fi
@@ -665,7 +651,7 @@ function Load_Enemies {
 
 function Game_Loop {
     local           \
-        discard     \
+        draw_exit   \
         hit         \
         key         \
         key1        \
@@ -685,21 +671,24 @@ function Game_Loop {
             sleep 2
             tput cup 19 21
             printf "         "
-            new_level=false
             # Clear input buffer
-            read -t 0.0001 -n 10000 discard
+            read -t 0.0001 -n 10000
             # Increase speed
             speed=$(( 60 - ($level * 2) ))
             (( $speed < 12 )) && speed=12
             Load_Enemies false
         fi
         # Draw enemies if loop was not interrupted with key input
-        $draw_enemies && Draw_All
+        if $draw_enemies; then
+            Draw_All
+            draw_exit=$?
+            (( $draw_exit > 1 )) && return $draw_exit
+        fi
         pre_time=$( date '+%2N' | sed 's/^0//' )
-        read -rsn1 -t0.$(( $speed - $time_taken )) key1
+        IFS= read -rsn1 -t0.$(( $speed - $time_taken )) key1
         read_pid=$?
-        read -rsn1 -t0.0001 key2
-        read -rsn1 -t0.0001 key3
+        IFS= read -rsn1 -t0.0001 key2
+        IFS= read -rsn1 -t0.0001 key3
 
         # If read timeout was interrupted
         if (( $read_pid != 142 )); then
@@ -720,7 +709,7 @@ function Game_Loop {
                     printf '%7s' ''
                 fi
                 hit=true
-            elif [[ "$key1" =~ ^[a-Z]$ ]]; then
+            elif [[ "$key1" =~ ^[a-Z0-9]$ ]]; then
                 key=$( tr 'A-Z' 'a-z' <<< "$key1" )
                 if [ -z "$word_focus" ] && ! $hit; then
                     # Loop through all words on screen
@@ -777,16 +766,12 @@ function Game_Loop {
             draw_enemies=true
             time_taken=0
         fi
+        unset key1 key2 key3
     done
 }
 
 # Set blank global variables to allow restarting
 function New_Game {
-    if [ -s "$text_file" ]; then
-        text=$lib_dir/texts/plaintext
-        # Format text file to allow each line to be built into an array
-        tr '.' '\n' < "$text_file" | sed -r 's/(-|—)/ /;s/[^([:alnum:]| )]//g;/^ *$/d' >| "$text"
-    fi
     Clear_Map 37
     # Build wall at full width of the playable area
     wall_log=( $( printf '%.0s4 ' {0..46} ) )
@@ -850,34 +835,245 @@ function New_Game {
     score=0
     Score_Modifier false
     Game_Loop
+    return $?
 }
 
 ####    Menu system    ####
 
+: <<'Text_Entry_Doc'
+    @Param      int     1
+        Row to read input
+    @Param      int     2
+        Col to read input
+    @Param      int     3
+        Max length of input
+    @Param      string  4
+        Backspace replacement character
+    @Param      string  5
+        Variable name to overwrite
+Text_Entry_Doc
+
+function Text_Entry {
+    local               \
+        input_string    \
+        key
+    tput cup $1 $2
+    # Turn echo back on for text input
+    stty echo
+    tput cvvis
+    printf '\e[1m'
+    read -n 10000 -t 0.0001 discard
+    # Clear IFS to avoid whitespace treated as null
+    while IFS= read -sn1 key; do
+        if [ -z "$key" ]; then
+            if (( ${#input_string} )); then
+                break
+            else
+                tput cup $1 $2
+            fi
+        # If backspace character is pressed, remove last entry
+        elif [[ "$key" == $'\177' ]]; then
+            if (( ${#input_string} )); then
+                printf "\b$4\b"
+                input_string=${input_string:0: -1}
+            fi
+        elif (( ${#input_string} > $3 )); then
+            continue
+        elif [[ "$key" == [\ _] ]]; then
+            # Replace spaces with underscores
+            printf '_'
+            input_string+="_"
+        elif [[ "$key" == [[:punct:]] ]]; then
+            # Disallow punctuation
+            continue
+        elif [[ "$key" == [[:alnum:]] ]]; then
+            printf "$key"
+            input_string+="$key"
+        fi
+    done
+    eval "$5"="$input_string"
+    printf '\e[0m'
+    tput civis
+    stty -echo
+}
+
+: <<'Print_Score_Doc'
+    @Param      int     1
+        Row to print next highscore
+    @Param      int     2
+        Number associated to the highscore
+    @Param      string  3
+        Highscore username
+    @Param      string  4
+        Highscore value
+Print_Score_Doc
+
+function Print_Score {
+    local           \
+        b           \
+        hr_score    \
+        pad         \
+        spacer
+    # Make the score human readable
+    for (( b=${#4}; b>0; b-- )); do
+        (( ($b < ${#4}) && ($b % 3 == 0) )) && hr_score+=","
+        hr_score+="${4: -b:1}"
+    done
+    tput cup $1 6
+    pad=$(( 33 - (${#3} + ${#hr_score}) ))
+    eval printf -v spacer '%.0s.' {1..$pad}
+    printf '%-3s%s%s%s\e[0m' "$2" "$3" "$spacer" "$hr_score"
+}
+
 function Show_Scores {
-    local score
-    Clear_Map $1
-    tput cup 4 19
-    printf '\e[1mHigh Scores\e[0m'
-    line_num=7
-    while read -r score; do
-        score_name=$( cut -d\  -f1 <<< "$score" )
-        score_value=$(  cut -d\  -f2 <<< "$score" )
-        # Half of terminal width minus the score name
-        tput cup $line_num $(( 24 - (${#score_name} + 1) ))
-        printf "$score_name - $score_value"
-        (( line_num++ ))
-    done < "$hs_log"
+    local               \
+        hs_name         \
+        key             \
+        line_index      \
+        ln              \
+        next_score      \
+        num_scores      \
+        score_ln        \
+        score_max       \
+        score_row       \
+        usernames=()    \
+        userscores=()
+
+    Clear_Map 38
+    tput cup 3 19
+    printf '\e[1mHIGHSCORES\e[0m'
+
+    if [ -s "$text_file" ]; then
+        hs_log="$log_dir/highscores/$( basename "$text_file" | tr [A-Z] [a-z] )"
+        hs_log="${hs_log%\.*}.shs"
+    else
+        hs_log="$log_dir/highscores/default.shs"
+    fi
+    touch "$hs_log"
+
+    hs_name=$( basename "$hs_log" .shs )
+    tput cup 5 $(( 24 - (${#hs_name} / 2) ))
+    printf "${hs_name^}"
+
+    num_scores=$( wc -l < "$hs_log" )
+    for (( ln=0; ln<$num_scores; ln++ )); do
+        line_index=$(( $ln + 1 ))
+        score_ln=$( sed -n "${line_index}p" "$hs_log" )
+        userscores[$ln]=${score_ln/*\,/}
+        usernames[$ln]=${score_ln/\,*/}
+    done
+
+    score_row=8
+    score_max=$(( ${#userscores[@]} < 21 ? ${#userscores[@]} : 20 ))
+    for (( next_score=0; next_score<$score_max; next_score++ )); do
+        tput cup $score_row 6
+        Print_Score $score_row $(( $next_score + 1 )) \
+            "${usernames[$next_score]}" ${userscores[$next_score]}
+        (( score_row++ ))
+    done
+
+    tput cup 30 22
+    printf '\e[7mBACK\e[0m'
+    while IFS= read -n1 key; do
+        [ -z "$key" ] && return
+    done
 }
 
 function Sub_Menu {
-    Clear_Map 38
-    tput cup 4 21
-    printf '\e[1mOptions\e[0m'
-    option_list=( "Change Extension" "Show Hidden Files" )
+    local                   \
+        allow_change=true   \
+        CHEXT               \
+        cycle_max=4         \
+        EXTB                \
+        HIDDEN              \
+        key1                \
+        key2                \
+        key3                \
+        sm_choose=4
+
+    if ${settings[1]}; then
+        allow_change=false
+        cycle_max=3
+        sm_choose=3
+    fi
+    Clear_List
+    tput cup 4 8
+    printf '\e[1m             OPTIONS         \e[0m'
     while true; do
-        read
+        case $sm_choose in
+            *)  if $allow_change; then
+                    CHEXT='Change Extension'
+                else
+                    CHEXT='\e[2mChange Extension\e[0m'
+                fi
+                EXTB='Ignore Extension'
+                HIDDEN='Show Hidden Files'
+                SAVE='Save Settings'
+                RETURN='Main Menu';;&
+            4)  CHEXT="\e[7m$CHEXT\e[0m";;
+            3)  EXTB="\e[7m$EXTB\e[0m";;
+            2)  HIDDEN="\e[7m$HIDDEN\e[0m";;
+            1)  SAVE="\e[7m$SAVE\e[0m";;
+            0)  RETURN="\e[7m$RETURN\e[0m";;
+        esac
+
+        tput cup 12 8
+        printf "$CHEXT"
+        tput cup 12 34
+        printf "${settings[0]}"
+        tput cup 15 8
+        printf "$EXTB"
+        tput cup 15 34
+        printf "%-5s" "${settings[1]}"
+        tput cup 18 8
+        printf "$HIDDEN"
+        tput cup 18 34
+        printf "%-5s" "${settings[2]}"
+        tput cup 31 18
+        printf "$SAVE"
+        tput cup 33 20
+        printf "$RETURN"
+
+        IFS= read -rsn1 key1
+        read -rsn1 -t 0.0001 key2
+        read -rsn1 -t 0.0001 key3
+
+        if [[ "$key3" == "A" ]]; then
+            (( $sm_choose == $cycle_max )) && sm_choose=0 || (( sm_choose++ ))
+        elif [[ "$key3" == "B" ]]; then
+            (( $sm_choose == 0 )) && sm_choose=$cycle_max || (( sm_choose-- ))
+        fi
+
+        if [ -z "$key1" ]; then
+            case $sm_choose in
+                4)  settings[0]=""
+                    tput cup 12 34
+                    printf "%6s"
+                    Text_Entry 12 34 6 " " "settings[0]";;
+                3)  if ${settings[1]}; then
+                        cycle_max=4
+                        allow_change=true
+                        settings[1]=false
+                    else
+                        cycle_max=3
+                        allow_change=false
+                        settings[1]=true
+                    fi;;
+                2)  ${settings[2]} && settings[2]=false || settings[2]=true;;
+                1)  printf "%s,%s,%s" "${settings[@]}" > $log_dir/settings.txt;;
+                0)  return 1;; # Return to main menu
+            esac
+        fi
+
+        if [[ "$key1" == $'\e' ]] && [ -z "$key2" -a -z "$key3" ]; then
+            break
+        fi
+        unset key1 key2 key3
     done
+    Clear_List
+    redraw_title=true
+    change_dir=true
+    return 0
 }
 
 # Similar to Clear_Map in function, but localised to the file structure
@@ -889,44 +1085,146 @@ function Clear_List {
     done
 }
 
-function File_Select {
-    Clear_Map 38
-    unset text_file
-    local                               \
-        change_dir=true                 \
-        contents                        \
-        current_directory="/home/$USER" \
-        ext_bash='.*\.[Tt][Xx][Tt]$'    \
-        ext_grep='(.txt|\/)$'           \
-        file_row                        \
-        highlighted_line                \
-        item                            \
-        item_colour                     \
-        item_limit                      \
-        item_selected                   \
-        key1                            \
-        key2                            \
-        key3                            \
-        line_count                      \
-        max_items                       \
-        new_primary_index               \
-        parent_colour                   \
-        parent_exists                   \
-        primary_index=1                 \
-        show_hidden=''                  \
-        trail
-    local extension=$ext_bash
+: <<'Check_File_Exists_Doc'
+    @Param      string  1
+        File to check
+Check_File_Exists_Doc
 
-    tput cup 4 10
-    printf '\e[1mPlease choose a text file\e[0m'
-    while [ -z "$text_file" ]; do
+function Check_File_Exists {
+    local           \
+        check_file  \
+        default_dir
+
+    for default_dir in ${diff_select[@]}; do
+        dir_lower=$( tr '[A-Z]' '[a-z]' <<< "$default_dir" )
+        check_file="$lib_dir/texts/$dir_lower/$( basename "$1" )"
+        if [ -s "$check_file" ]; then
+            chosen_item="$check_file"
+            return 1
+        fi
+    done
+    return 0
+}
+
+: <<'Preview_File_Doc'
+    @Param      string  1
+        File to be viewed
+Preview_File_Doc
+
+function Preview_File {
+    local           \
+        file_line   \
+        preview_row
+
+    Clear_Map 38 4
+    file_name=$( basename $1 )
+    tput cup 4 $(( 24 - (${#file_name} / 2) ))
+    printf "$file_name"
+    tput cup 6 21
+    printf "\e[1mPREVIEW\e[0m"
+    tput cup 36 22
+    printf "\e[7mBACK\e[0m"
+    preview_row=8
+
+    while read file_line; do
+        tput cup $preview_row 8
+        printf "${file_line:0:32}"
+        (( preview_row++ ))
+    done < <( head -n25 "$1" )
+    read -s
+
+    redraw_title=true
+    Clear_Map 38 4
+}
+
+: <<'File_Select_Doc'
+    @Param      string  1
+        Starting directory (optional)
+    @Param      bool    2
+        True if parent allowed (optional)
+    @Param      bool    3
+        True if settings allowed (optional)
+File_Select_Doc
+
+function File_Select {
+    Clear_List
+    unset text_file
+    local                                                       \
+        allow_navigate=true                                     \
+        allow_options=true                                      \
+        bkey1                                                   \
+        bkey2                                                   \
+        bkey3                                                   \
+        change_dir=true                                         \
+        char_lower                                              \
+        char_upper                                              \
+        contents                                                \
+        current_directory="/home/$USER"                         \
+        ext_char                                                \
+        ext_grep                                                \
+        file_name                                               \
+        file_row                                                \
+        highlighted_line                                        \
+        item                                                    \
+        item_colour                                             \
+        item_limit                                              \
+        item_selected                                           \
+        key1                                                    \
+        key2                                                    \
+        key3                                                    \
+        line_count                                              \
+        max_items                                               \
+        new_file_name                                           \
+        new_primary_index                                       \
+        parent_colour                                           \
+        parent_index                                            \
+        primary_index=1                                         \
+        redraw_title=true                                       \
+        save_file                                               \
+        settings=( $( tr ',' ' ' < "$log_dir/settings.txt" ) )  \
+        show_hidden                                             \
+        trail
+
+    if [ -n "$1" -a -d "$1" ]; then
+        current_directory="$1"
+    fi
+    if [ -n "$2" ]; then
+        allow_navigate=$2
+    fi
+    if [ -n "$3" ]; then
+        allow_options=$3
+    fi
+
+    while true; do
+        if $redraw_title && $allow_options; then
+            tput cup 4 8
+            printf '\e[1mPress escape for more options\e[0m'
+            redraw_title=false
+        fi
+
         # If in a new directory, clear the screen and update the variables
-        if "$change_dir"; then
+        if $change_dir; then
             [ -n "$file_row" ] && Clear_List
-            # Pull directory contents if they are a folder or text file
-            contents="$( ls -p "$show_hidden" "$current_directory" 2>/dev/null \
-                    | grep -Pi $ext_grep )"
-            # contents="$( ls -p "$current_directory" 2>/dev/null )"
+            if ${settings[2]}; then
+                show_hidden='-A'
+            else
+                show_hidden=''
+            fi
+            contents="$( ls -p $show_hidden "$current_directory" 2>/dev/null )"
+
+            # Set extension to search with
+            if ${settings[1]}; then
+                ext_grep=""
+            else
+                ext_grep="(\.${settings[0]}|\/)$"
+            fi
+
+            # Pull directory contents
+            contents="$(
+                ls -p $show_hidden "$current_directory" 2>/dev/null | \
+                grep -Pi "$ext_grep"
+            )"
+
             # Always highlight first entry, if exists, not parent
             if [ -z "$contents" ]; then
                 item_selected=0
@@ -942,62 +1240,64 @@ function File_Select {
         fi
 
         # If there is a parent, then show "../"
-        if [[ "$current_directory" != "/" ]]; then
+        if [[ "$current_directory" =~ /.+ ]] && $allow_navigate; then
             tput cup 6 8
             parent_colour="\e[1;34m"
             (( $item_selected )) || parent_colour="\e[7;1;34m"
             printf "$parent_colour..\e[0m/"
-            parent_exists=0
+            parent_index=0
         else
-            # If not, disallow highlighting
-            parent_exists=1
+            # If not, disallow highlighting by setting max scroll height
+            parent_index=1
         fi
 
         file_row=7
         line_count=1
         while read -r item; do
+            # If directory (cannot test -d due to relative path)
             if [[ "$item" =~ .*/$ ]]; then
                 item=${item:0:-1}
                 item_colour="\e[1;34m"
                 trail="/"
-            elif [[ "$item" =~ $extension ]]; then
-            # else
+            else
                 item_colour=""
                 trail=""
-            else
-                continue
             fi
             tput cup $(( file_row++ )) 8
             (( $highlighted_line == $line_count )) && printf "\e[7m"
+            # Allow only 32 items on screen up to 33 characters
             item_limit=$(( ${#item} > 32 ? 32 : ${#item} ))
             line_limit=$(( $item_limit == 33 ? 0 : (33 - $item_limit) ))
             printf "$item_colour%-${item_limit}s\e[0m%-${line_limit}s" "${item:0:32}" "$trail"
             (( line_count++ ))
-
-        done < <( sed -n "${primary_index},$(( $primary_index + 28 ))p"  <<< "$contents" )
+        done < <( sed -n "${primary_index},$(( $primary_index + 28 ))p" <<< "$contents" )
 
         # Take key input
-        read -rsn1 key1
-        read -rsn1 -t0.0001 key2
-        read -rsn1 -t0.0001 key3
+        IFS= read -rsn1 key1
+        IFS= read -rsn1 -t0.0001 key2
+        IFS= read -rsn1 -t0.0001 key3
+
+        # If backspace then return to previous menu
+        if [[ "$key1" == $'\177' ]]; then
+            return 0
+        fi
 
         case $key3 in
-            A)  if (( ($parent_exists && $item_selected == 1) \
-                        || ($parent_exists == 0 && $item_selected == 0) )); then
+            A)  if (( $item_selected == $parent_index )); then
                     item_selected=$max_items
                     highlighted_line=$max_items
                 else
                     (( item_selected-- ))
                     (( highlighted_line-- ))
-                fi;; #Up
+                fi;; # Up
             B)  if (( $item_selected == $max_items )); then
-                    item_selected=$parent_exists
-                    highlighted_line=$parent_exists
+                    item_selected=$parent_index
+                    highlighted_line=$parent_index
                 else
                     (( item_selected++ ))
                     (( highlighted_line++ ))
                 fi;; # Down
-            D)  if [[ "$current_directory" != "/" ]]; then
+            D)  if (( $parent_index == 0 )); then
                     unset key1
                     item_selected=0
                     highlighted_line=0
@@ -1012,8 +1312,6 @@ function File_Select {
                 new_primary_index=$(( $item_selected - 14 ))
             elif (( $item_selected <= $max_items )); then
                 new_primary_index=$(( $max_items - 28 ))
-            # else
-            #     new_primary_index=$primary_index
             fi
             if (( $new_primary_index != $primary_index )); then
                 if (( $new_primary_index > $primary_index && $highlighted_line != $max_items )); then
@@ -1025,72 +1323,233 @@ function File_Select {
             fi
         fi
 
-        (( $highlighted_line == $max_items && $max_items > 29 )) && highlighted_line=29
+        if (( ($highlighted_line == $max_items) && ($max_items > 29) )); then
+            highlighted_line=29
+        fi
 
         # If user presses enter or the right arrow key
         if [ -z "$key1" ] || [[ "$key3" == "C" ]]; then
             if (( $item_selected )); then
-                chosen_item="$( sed -n "${item_selected}p" <<< "$contents" )"
+                chosen_item="$current_directory/$( sed -n "${item_selected}p" <<< "$contents" )"
                 # If chosen item is a directory, then open it
                 if [[ "$chosen_item" =~ .*/$ ]]; then
-                    current_directory="$current_directory/$chosen_item"
+                    # Strip trailing slash
+                    current_directory="${chosen_item:0: -1}"
                     change_dir=true
+                elif [ -s "$chosen_item" -a -z "$key1" ]; then
+                    # If in custom file select and does not already exist
+                    if $allow_navigate; then
+                        new_file_name="$( basename "${chosen_item%.*}" | tr ' ' '_' | sed 's/^\.//' ).txt"
+                        Check_File_Exists "$new_file_name"
+                        if (( ! $? )); then
+                            Clear_Map 38 4
+                            file_name=$( basename "$chosen_item" )
+                            tput cup 4 $(( 24 - (${#file_name} / 2) ))
+                            printf "$file_name"
+                            tput cup 7 8
+                            printf "Would you like to save this file"
+                            tput cup 8 13
+                            printf "to the custom folder?"
+                            save_file=1
+                            while true; do
+                                tput cup 10 20
+                                if (( $save_file )); then
+                                    printf "\e[7mYES\e[0m    NO"
+                                else
+                                    printf "YES    \e[7mNO\e[0m"
+                                fi
+
+                                IFS= read -rsn1 bkey1
+                                read -rsn1 -t0.0001 bkey2
+                                read -rsn1 -t0.0001 bkey3
+                                [[ "$bkey3" == [CD] ]] && (( save_file ^= 1 ))
+
+                                if [ -z "$bkey1" ]; then
+                                    if (( $save_file )); then
+                                        # Format filename to a text file
+                                        text_file="$lib_dir/texts/custom/$new_file_name"
+                                    else
+                                        text_file="/tmp/$new_file_name"
+                                    fi
+                                    # Format text file to allow each line to be built into an array
+                                    tr '.' '\n' < "$chosen_item" | \
+                                        sed -r 's/(-|—)/ /;s/[^[:alnum:]| ]//g;/^ *$/d' >| "$text_file"
+                                    # Remove leading and trailing whitespace
+                                    sed -i 's/^[[:space:]]*//;s/[[:space:]]*$//' "$text_file"
+                                    return 1
+                                fi
+                                unset bkey1 bkey2 bkey3
+                            done
+                        else
+                            text_file="$chosen_item"
+                            return 1
+                        fi
+                    # If in easy, medium or hard
+                    else
+                        text_file="$chosen_item"
+                        return 1
+                    fi
                 fi
-            elif [[ "$current_directory" != "/" ]]; then
+            elif (( $parent_index == 0 )); then
                 # Go to parent
                 current_directory="$( dirname "$current_directory" )"
-                parent_exists=0
                 change_dir=true
             fi
         fi
 
-        if ( [[ "$key1" == $'\e' ]] && [ -z "$key2" -a -z "$key3" ] ); then
-            Sub_Menu
+        # If space, show preview
+        if [[ "$key1" == " " ]]; then
+            Preview_File "$current_directory/$( sed -n "${item_selected}p" <<< "$contents" )"
+        fi
+
+        # If escapse, show settings
+        if [[ "$key1" == $'\e' ]]; then
+            if [ -z "$key2" -a -z "$key3" ] && $allow_options; then
+                Sub_Menu
+                (( $? )) && return 1
+            # If navigation is allowed, go to /home/$USER on home key press
+            elif $allow_navigate && [[ "$key3" = "H" ]]; then
+                current_directory="/home/$USER"
+                change_dir=true
+            fi
         fi
         unset key1 key2 key3
     done
+}
 
-    #TODO sub menu
-    #TODO hidden files
-    #TODO specific file extensions
-    #TODO save replacement text file
+function File_Menu {
+    local                           \
+        diff_choose=0               \
+        diff_cols=( 4 15 28 39 )    \
+        diff_index                  \
+        diff_select                 \
+        dir_lower                   \
+        key1                        \
+        key2                        \
+        key3                        \
+
+    Clear_Map 38
+    tput cup 0 11
+    printf "┬────────────┬──────────┬"
+    tput cup 1 11
+    printf "│            │          │"
+    tput cup 2 0
+    printf "├──────────┴────────────┴──────────┴────────────┤"
+
+    while true; do
+        diff_select=(
+            'EASY'
+            'MEDIUM'
+            'HARD'
+            'CUSTOM'
+        )
+
+        for (( diff_index=0; diff_index<${#diff_cols[@]}; diff_index++ )); do
+            tput cup 1 ${diff_cols[$diff_index]}
+            if (( $diff_index == $diff_choose )); then
+                printf "\e[7m${diff_select[$diff_choose]}\e[0m"
+            else
+                printf "${diff_select[$diff_index]}"
+            fi
+        done
+
+        IFS= read -rsn1 key1
+        read -rsn1 -t 0.0001 key2
+        read -rsn1 -t 0.0001 key3
+
+        if [[ "$key3" == "D" ]]; then
+            (( $diff_choose == 0 )) && diff_choose=3 || (( diff_choose-- ))
+        elif [[ "$key3" == "C" ]]; then
+            (( $diff_choose == 3 )) && diff_choose=0 || (( diff_choose++ ))
+        fi
+        if [ -z "$key1" ]; then
+            Clear_Map 38 3
+            # Print menu again but fade non-chosen
+            for (( diff_index=0; diff_index<${#diff_cols[@]}; diff_index++ )); do
+                tput cup 1 ${diff_cols[$diff_index]}
+                if (( $diff_index != $diff_choose )); then
+                    printf "\e[2m${diff_select[$diff_index]}\e[0m"
+                else
+                    printf "\e[1m${diff_select[$diff_choose]}"
+                fi
+            done
+
+            dir_lower=$( tr '[A-Z]' '[a-z]' <<< "${diff_select[$diff_choose]}" )
+            if (( $diff_choose == 3 )); then
+                File_Select "$lib_dir/texts/$dir_lower"
+                (( $? )) && return
+            else
+                File_Select "$lib_dir/texts/$dir_lower" false false
+                (( $? )) && return
+            fi
+        fi
+
+        if [[ "$key1" == $'\177' ]] && [ -z "$key2" -a -z "$key3" ]; then
+            return
+        fi
+        unset key1 key2 key3
+    done
 }
 
 : <<'Clear_Map_Doc'
-    @Param      bool     1
+    @Param      int     1
         Amount of rows to clear
+    @Param      int     2
+        Starting row (optional)
 Clear_Map_Doc
 
 function Clear_Map {
-    # Clear the screen
-    #TODO fix this rubbish
-    # if $1; then
-    #     printf "\033[2J\033[0;0H"
-    # else
-        tput reset
-    # fi
-    local b
-    echo '┌───────────────────────────────────────────────┐'
-    for (( b=1; b<$1; b++ )); do
-        echo '│                                               │'
+    local               \
+        clear_row       \
+        clear_start=1
+
+    if [ -n "$2" ]; then
+        clear_start=$2
+        tput cup $2 0
+    else
+        # Clear the screen
+        if $in_tty; then
+            printf "\033[2J\033[0;0H"
+        else
+            tput reset
+        fi
+        printf '┌───────────────────────────────────────────────┐\n'
+    fi
+    for (( clear_row=$clear_start; clear_row<$1; clear_row++ )); do
+        printf '│                                               │\n'
     done
     printf '└───────────────────────────────────────────────┘'
     tput civis
 }
 
 function Main_Menu {
+    local controls_box
     # Clear screen
     tput clear
     # Display the main menu
     Clear_Map 38
     tput cup 2 18
-    echo "Ben  Pitman's"
+    printf "Ben  Pitman's"
     tput cup 4 14
     printf '\e[1mS U P E R S C R I P T\e[0m'
-    tput cup 10 20
-    printf '\e[1mCONTROLS\e[0m'
-    tput cup 14 11
-    echo 'Ctrl-C       -       Quit'
+    tput cup 8 18
+    printf '\e[1mGAME CONTROLS\e[0m'
+    tput cup 10 11
+    printf 'ESC          -      Pause'
+    tput cup 11 11
+    printf 'Ctrl-C       -       Quit'
+    tput cup 14 18
+    printf '\e[1mMENU CONTROLS\e[0m'
+    tput cup 16 11
+    printf 'arrow keys   -   navigate'
+    tput cup 17 11
+    printf 'ESC          -    options'
+    tput cup 18 11
+    printf 'backspace    -       back'
+    tput cup 19 11
+    printf 'space        -    preview'
+    tput cup 20 11
+    printf 'home         -   go to ~/'
 }
 
 # Populate sprite array
@@ -1098,52 +1557,72 @@ declare -A sprite
 Load_Sprites
 
 stty -echo # Disable echo
-hs_log="$log_dir/highscores/default"
+hs_log="$log_dir/highscores/default.shs"
 touch "$hs_log" # Create score log if doesn't exist
 lib_dir="/usr/local/lib/superscript"
 tput civis  # Disable cursor blinker
 selected=3 # Default menu select
 
 # Selection menu outside a function to refresh the main upon return
+Main_Menu
 while true; do
-    Main_Menu
     case $selected in
-        *)  unset START SCORES TEXT QUIT;;&
-        3)  START='\e[1;36mSTART\e[0m'
-            redirect="New_Game";;
-        2)  TEXT='\e[1;36mCHOOSE TEXT\e[0m'
-            redirect="File_Select";;
-        1)  SCORES='\e[1;36mHIGH SCORES\e[0m'
-            redirect="Show_Scores 38";;
-        0)  QUIT='\e[1;36mQUIT\e[0m';;
+        *)  START='START'
+            TEXT='CHOOSE TEXT'
+            SCORES='HIGH SCORES'
+            QUIT='QUIT';;&
+        3)  START="\e[7m$START\e[0m";;
+        2)  TEXT="\e[7m$TEXT\e[0m";;
+        1)  SCORES="\e[7m$SCORES\e[0m";;
+        0)  QUIT="\e[7m$QUIT\e[0m";;
     esac
-    set ${START:='START'}           \
-        ${TEXT:='CHOOSE TEXT'}      \
-        ${SCORES:='HIGH SCORES'}    \
-        ${QUIT:='QUIT'}
-    tput cup 18 22
-    printf "$START"
-    tput cup 20 19
-    printf "$TEXT"
-    tput cup 22 19
-    printf "$SCORES"
+
     tput cup 24 22
+    printf "$START"
+    tput cup 26 19
+    printf "$TEXT"
+    tput cup 28 19
+    printf "$SCORES"
+    tput cup 30 22
     printf "$QUIT"
+
+    if [ -s "$text_file" ]; then
+        hs_log="$log_dir/highscores/$( basename "$text_file" | tr [A-Z] [a-z] )"
+        hs_log="${hs_log%\.*}.shs"
+    else
+        hs_log="$log_dir/highscores/default.shs"
+    fi
+    touch "$hs_log"
+
+    hs_name=$( basename "$hs_log" .shs | tr '_' ' ' )
+    tput cup 34 $(( 24 - (${#hs_name} / 2) ))
+    printf "\e[4m${hs_name^}\e[0m"
+    tput cup 35 16
+    printf 'Text file chosen'
+
     # Get user input and control keys
-    read -rsn1 key1
+    IFS= read -rsn1 key1
     read -rsn1 -t 0.0001 key2
     read -rsn1 -t 0.0001 key3
+
     if [[ "$key3" == "A" ]]; then
         (( $selected == 3 )) && selected=0 || (( selected++ )) # Up
     elif [[ "$key3" == "B" ]]; then
         (( $selected == 0 )) && selected=3 || (( selected-- )) # Down
     fi
+
     if [ -z "$key1" ]; then
-        if (( $selected )); then
-            $redirect
-        else
-            exit
-        fi
+        case $selected in
+            3)  while true; do
+                    New_Game
+                    (( $? == 3 )) && break
+                done;;
+            2)  File_Menu;;
+            1)  Show_Scores false;;
+            0)  exit;;
+        esac
+        Main_Menu
     fi
+
     unset key1 key2 key3
 done

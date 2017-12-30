@@ -859,7 +859,6 @@ gite
 give
 glad
 glee
-gleg
 glen
 gley
 glia
@@ -935,14 +934,12 @@ gyro
 gyve
 hack
 hade
-hadj
 haen
 haet
 haft
 haik
 hail
 hair
-haji
 haka
 hake
 haku
@@ -2426,7 +2423,6 @@ vote
 vuln
 wack
 wade
-wadi
 wady
 waff
 waft
