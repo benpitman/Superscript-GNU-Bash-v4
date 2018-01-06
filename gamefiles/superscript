@@ -75,8 +75,8 @@ function Check_Terminal_Size {
         # box_height=$(( $max_height > $term_height ? $term_height : $max_height ))
         tput clear
         tput cup 0 0
-        for y in $( seq 0 $max_height ); do
-            for x in $( seq 0 $box_width ); do
+        for (( y=0; y<=$max_height; y++ )); do
+            for (( x=0; x<=$box_width; x++ )); do
                 if (( $y == 0 )); then
                     if (( $x == 0 )); then
                         printf '\u250c' # ┌
@@ -112,23 +112,6 @@ function Check_Terminal_Size {
                 else
                     printf ' '
                 fi
-                #
-                #     if (( $x == ($max_width / 2) )); then
-                #         printf '+'
-                #     elif (( $x == 0 || $x == $max_width )); then
-                #         printf '|'
-                #     else
-                #         printf '-'
-                #     fi
-                # elif (( $x == ( $max_width / 2 ) )); then
-                #     if (( $y == 0 || $y == $max_height )); then
-                #         printf '-'
-                #     else
-                #         printf '|'
-                #     fi
-                # else
-                #     printf ' '
-                # fi
             done
             (( $y != $max_height )) && echo
         done
@@ -157,9 +140,9 @@ if $graphical_mode; then
     gnome-terminal                  \
         --title "Superscript"       \
         --geometry 49x39+800+250 -e \
-        "bash /home/alek/Git/Superscript-GNU-Bash-v4/gamefiles/superscript-game $graphical_mode $debug_mode" 2>/dev/null
+        "bash superscript-game $graphical_mode $debug_mode" 2>/dev/null
 else
     Check_Terminal_Size
-    bash /home/alek/Git/Superscript-GNU-Bash-v4/gamefiles/superscript-game "$graphical_mode" "$debug_mode"
+    bash superscript-game "$graphical_mode" "$debug_mode"
 fi
 exit 0
