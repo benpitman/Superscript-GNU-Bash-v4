@@ -16,21 +16,24 @@ if [[ "$USER" != "root" ]]; then
             break
         fi
     done
+    do_sudo=sudo
+else
+    do_sudo=
 fi
 
 # Install gnome-terminal
 if ! hash gnome-terminal 2>/dev/null; then
     printf  "Superscript is most compatible in terminals that can display
             \rdouble-width unicode characters, such as gnome-terminal.
-            \rWithout it, the option '-g' cannot be used.
+            \rWithout it, the option '-g' cannot be used (GUI ONLY).
             \rAccessed with the '-g' option or an executable shortcut.
             \rWould you like to install it now?\n"
     while read -rp 'Y/N> ' install_gt; do
         if [[ "$install_gt" == [Yy] ]]; then
             if hash apt 2>/dev/null; then
-                sudo apt-get -yq install gnome-terminal || exit $?
+                $do_sudo apt-get -yq install gnome-terminal || exit $?
             elif hash yum 2>/dev/null; then
-                sudo yum -yq install gnome-terminal || exit $?
+                $do_sudo yum -yq install gnome-terminal || exit $?
             fi
             printf "gnome-terminal installed\n"
             break
@@ -46,20 +49,21 @@ log_dir='/var/games/superscript'
 hs_dir='/var/games/superscript/highscores'
 current=$( dirname "$( readlink -f "$0" )" )
 
-sudo mkdir -p "$lib_dir" "$hs_dir"
-sudo chmod -R o+wr "$lib_dir" "$log_dir"
+$do_sudo mkdir -p "$lib_dir" "$hs_dir"
+$do_sudo chmod -R o+wr "$lib_dir" "$log_dir"
 
 cp -r "$current"/allies "$lib_dir"
 cp -r "$current"/texts "$lib_dir"
 cp -r "$current"/icons "$lib_dir"
-sudo cp "$current"/gamefiles/* "$game_dir"
+$do_sudo cp "$current"/gamefiles/* "$game_dir"
 chmod a+x "$game_dir/superscript-game" "$game_dir/superscript"
 printf 'txt,false,false' > "$log_dir/settings.txt"
 
 printf "\nSuperscript installed.\n\n"
 
 if hash gnome-terminal 2>/dev/null; then
-    printf "Would you like an application shortcut?\n"
+    printf  "Would you like an application shortcut?
+            \rThis will only work with a graphical interface."
     while read -rp 'Y/N> ' shortcut; do
         [[ "$shortcut" == [Yy] ]] && break
         [[ "$shortcut" == [Nn] ]] && exit 0
@@ -89,7 +93,7 @@ while true; do
 done
 tput cvvis
 
-cat <<'LAUNCHER' | sudo tee /usr/share/applications/superscript.desktop 1>/dev/null
+cat <<'LAUNCHER' | $do_sudo tee /usr/share/applications/superscript.desktop 1>/dev/null
 [Desktop Entry]
 Type=Application
 Terminal=false
@@ -98,8 +102,21 @@ Icon=$lib_dir/icons/superscript_icon_$icon_name.png
 Exec=superscript -g
 LAUNCHER
 
-shortcut_file="/home/$USER/Desktop/Superscript"
-sudo cp -p /usr/share/applications/superscript.desktop "$shortcut_file"
-sudo chmod a+x "$shortcut_file"
+if [[ "$USER" == "root" ]]; then
+    printf  'root does not own a desktop, please enter a home user.
+            \rLeave blank to cancel.\n'
+    while read -rp "> " username; do
+        [ -z "$username" ] && exit 0
+        if id -u $username 2>/dev/null; then
+            break
+        else
+            printf 'User does not exist\n'
+        fi
+    done
+fi
+
+shortcut_file="/home/$username/Desktop/Superscript"
+$do_sudo cp -p /usr/share/applications/superscript.desktop "$shortcut_file"
+$do_sudo chmod a+x "$shortcut_file"
 
 printf '\nDone\n'
