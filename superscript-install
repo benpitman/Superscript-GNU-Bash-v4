@@ -6,15 +6,17 @@ if (( $bash_version < 4 )); then
     exit 1
 fi
 
-printf "Your password is required to install this game.
-        \rLeave blank to cancel install.\n"
-while true; do
-    read -sp '> ' PASS
-    [ -z "$PASS" ] && exit 0
-    if $( echo "$PASS" | sudo -Svp '' ); then
-        break
-    fi
-done
+if [[ "$USER" != "root" ]]; then
+    printf "Your password is required to install this game.
+            \rLeave blank to cancel install.\n"
+    while true; do
+        IFS= read -sp '> ' PASS
+        [ -z "$PASS" ] && exit 0
+        if $( echo "$PASS" | sudo -Svp '' ); then
+            break
+        fi
+    done
+fi
 
 # Install gnome-terminal
 if ! hash gnome-terminal 2>/dev/null; then
@@ -44,29 +46,15 @@ log_dir='/var/games/superscript'
 hs_dir='/var/games/superscript/highscores'
 current=$( dirname "$( readlink -f "$0" )" )
 
-if [[ "$USER" == "root" ]]; then
-    printf 'root cannot own log files, please enter a home user.
-            \rLeave blank to cancel.\n'
-    while read -rp "> " user; do
-        [ -z "$user" ] && exit 0
-        if id -u $user 2>/dev/null; then
-            break
-        else
-            printf 'User does not exist\n'
-        fi
-    done
-fi
+sudo mkdir -p "$lib_dir" "$hs_dir"
+sudo chmod -R o+wr "$lib_dir" "$log_dir"
 
-sudo mkdir "$lib_dir" "$log_dir" "$hs_dir" 2>/dev/null
-sudo chown -R $USER: "$lib_dir" "$log_dir"
-cp -rp "$current"/allies "$lib_dir"
-cp -rp "$current"/texts "$lib_dir"
-cp -rp "$current"/icons "$lib_dir"
+cp -r "$current"/allies "$lib_dir"
+cp -r "$current"/texts "$lib_dir"
+cp -r "$current"/icons "$lib_dir"
 sudo cp "$current"/gamefiles/* "$game_dir"
-
-sudo chmod 755 "$game_dir"/superscript
-
-printf 'txt,false,false' > "$log_dir/superscript/settings.txt"
+chmod a+x "$game_dir/superscript-game" "$game_dir/superscript"
+printf 'txt,false,false' > "$log_dir/settings.txt"
 
 printf "\nSuperscript installed.\n\n"
 
