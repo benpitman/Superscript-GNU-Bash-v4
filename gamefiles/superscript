@@ -31,15 +31,21 @@ ____HELP
 }
 
 function uninstall {
-    sudo -k
-    printf "Your password is required to uninstall this game.
-            \rLeave blank to cancel uninstall."
-    while read -rsp $'\n> ' PASS; do
-        [ -z "$PASS" ] && exit 0
-        ( echo "$PASS" | sudo -Svp '' ) && break
-    done
-    sudo rm -r /usr/local/lib/superscript /var/games/superscript
-    sudo rm /usr/local/bin/superscript-game /usr/local/bin/superscript
+    local PASS
+    if [[ "$USER" != "root" ]]; then
+        sudo -k
+        printf "Your password is required to uninstall this game.
+                \rLeave blank to cancel uninstall."
+        while read -rsp $'\n> ' PASS; do
+            [ -z "$PASS" ] && exit 0
+            ( echo "$PASS" | sudo -Svp '' ) && break
+        done
+        do_sudo=sudo
+    else
+        do_sudo=
+    fi
+    $do_sudo rm -r /usr/local/lib/superscript /var/games/superscript
+    $do_sudo rm /usr/local/bin/superscript-game /usr/local/bin/superscript
     printf 'Uninstallation complete\n'
     exit 0
 }

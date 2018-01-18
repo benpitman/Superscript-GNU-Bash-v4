@@ -709,7 +709,7 @@ function Game_Loop {
                     printf '%7s' ''
                 fi
                 hit=true
-            elif [[ "$key1" =~ ^[A-z0-9]$ ]]; then
+            elif [[ "$key1" =~ ^[a-zA-Z0-9]$ ]]; then
                 key=$( tr 'A-Z' 'a-z' <<< "$key1" )
                 if [ -z "$word_focus" ] && ! $hit; then
                     # Loop through all words on screen

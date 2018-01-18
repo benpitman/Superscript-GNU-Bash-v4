@@ -1,6 +1,6 @@
 #!/bin/bash
 
-bash_version=$( bash --version | grep -Po 'bash, version \K[0-9]' )
+bash_version=$( grep -o '^[0-9]' <<< "$BASH_VERSION" )
 if (( $bash_version < 4 )); then
     printf "Incorrect bash version. Please upgrade to 4 or above."
     exit 1
@@ -56,14 +56,14 @@ cp -r "$current"/allies "$lib_dir"
 cp -r "$current"/texts "$lib_dir"
 cp -r "$current"/icons "$lib_dir"
 $do_sudo cp "$current"/gamefiles/* "$game_dir"
-chmod a+x "$game_dir/superscript-game" "$game_dir/superscript"
+$do_sudo chmod a+x "$game_dir/superscript-game" "$game_dir/superscript"
 printf 'txt,false,false' > "$log_dir/settings.txt"
 
 printf "\nSuperscript installed.\n\n"
 
 if hash gnome-terminal 2>/dev/null; then
     printf  "Would you like an application shortcut?
-            \rThis will only work with a graphical interface."
+            \rThis will only work with unity."
     while read -rp 'Y/N> ' shortcut; do
         [[ "$shortcut" == [Yy] ]] && break
         [[ "$shortcut" == [Nn] ]] && exit 0
@@ -93,14 +93,12 @@ while true; do
 done
 tput cvvis
 
-cat <<'LAUNCHER' | $do_sudo tee /usr/share/applications/superscript.desktop 1>/dev/null
-[Desktop Entry]
+echo "[Desktop Entry]
 Type=Application
 Terminal=false
 Name=Superscript
-Icon=$lib_dir/icons/superscript_icon_$icon_name.png
-Exec=superscript -g
-LAUNCHER
+Icon=$lib_dir/icons/superscript-icon-$icon_name.png
+Exec=superscript -g" | $do_sudo tee /usr/share/applications/superscript.desktop 1>/dev/null
 
 if [[ "$USER" == "root" ]]; then
     printf  'root does not own a desktop, please enter a home user.
@@ -113,10 +111,13 @@ if [[ "$USER" == "root" ]]; then
             printf 'User does not exist\n'
         fi
     done
+else
+    username="$USER"
 fi
 
-shortcut_file="/home/$username/Desktop/Superscript"
+shortcut_file="/home/$username/Desktop/Superscript.desktop"
 $do_sudo cp -p /usr/share/applications/superscript.desktop "$shortcut_file"
+$do_sudo chown "$username": "$shortcut_file"
 $do_sudo chmod a+x "$shortcut_file"
 
 printf '\nDone\n'
