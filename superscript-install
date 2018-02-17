@@ -61,7 +61,7 @@ printf 'txt,false,false' > "$log_dir/settings.txt"
 
 printf "\nSuperscript installed.\n\n"
 
-if hash gnome-terminal 2>/dev/null; then
+if hash gnome-terminal 2>/dev/null && [ -d "/usr/share/applications" ]; then
     printf  "Would you like an application shortcut?
             \rThis will only work with unity."
     while read -rp 'Y/N> ' shortcut; do

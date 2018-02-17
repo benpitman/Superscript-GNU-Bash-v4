@@ -31,7 +31,7 @@ else
     exec 2>$log_dir/error.log
 fi
 
-function Cleanup {
+Cleanup() {
     [ -s "$hs_log" ] || rm "$hs_log"
     tput cvvis
     stty echo
@@ -41,7 +41,7 @@ function Cleanup {
 }
 trap Cleanup EXIT
 
-function Load_Sprites {
+Load_Sprites() {
     sprite['ship']='\e[1m\u23c5\e[0m'       # ⏅
     sprite['projectile']='\u0027'           # '
     sprite['enemy1']='\e[1m\u25bf\e[0m'     # ▿
@@ -57,7 +57,7 @@ function Load_Sprites {
     sprite['wall4']='\u2588'                # Full
 }
 
-function Game_Over {
+Game_Over() {
     local               \
         dw              \
         editable_index  \
@@ -81,7 +81,7 @@ function Game_Over {
     done
 
     # Iterate through any standing walls and destroy them
-    for (( dw=0; dw<47; dw++ )); do
+    for (( dw = 0; dw < 47; dw++ )); do
         if (( ${wall_log[$dw]} > 0 )); then
             Destroy_Wall $(( $dw + 1 ))
             Score_Modifier true $(( ${wall_log[$dw]} * 10 ))
@@ -98,12 +98,12 @@ function Game_Over {
 
     score_shown=false
     num_scores=$( wc -l < "$hs_log" )
-    for (( ln=0; ln<=$num_scores; ln++ )); do
-        line_index=$(( $ln + 1 ))
-        score_ln=$( sed -n "${line_index}p" "$hs_log" )
+    for (( ln = 0; ln <= $num_scores; ln++ )); do
+        score_ln=$( sed -n "$(( $ln + 1 ))p" "$hs_log" )
         userscores[$ln]=${score_ln/*\,/}
         usernames[$ln]=${score_ln/\,*/}
-        if ! $score_shown && ( (( ${userscores[$ln]} <= $score )) || \
+        if ! $score_shown && ( (( $num_scores == 0 )) || \
+                (( ${userscores[$ln]} <= $score )) || \
                 (( $ln == $num_scores )) ); then
             score_shown=true
             editable_index=$ln
@@ -123,7 +123,7 @@ function Game_Over {
     )
 
     score_row=8
-    for (( next_score=0; next_score<${#userscores[@]}; next_score++ )); do
+    for (( next_score = 0; next_score < ${#userscores[@]}; next_score++ )); do
         tput cup $score_row 6
         if (( $next_score < 20 )); then
             (( $next_score == $editable_index )) && editable_row=$score_row
@@ -132,8 +132,8 @@ function Game_Over {
         elif (( $editable_index > 19 )); then
             editable_row=30
             printf '\e[1m'
-            Print_Score $editable_row $(( $editable_index + 1 )) \
-                "" $score
+            Print_Score $editable_row $(( $editable_index + 1 )) "" $score
+            break
         else
             break
         fi
@@ -143,7 +143,7 @@ function Game_Over {
     Text_Entry $editable_row 9 8 "." "playername"
 
     # Add the new score to the highscores file
-    if (( $editable_index == $( wc -l < "$hs_log" ) )); then
+    if (( $editable_index == $num_scores )); then
         printf "$playername,$score\n" >> "$hs_log"
     else
         sed -i "$(( $editable_index + 1 ))s/^/$playername\,$score\n/" "$hs_log"
@@ -185,7 +185,7 @@ function Game_Over {
     done
 }
 
-function Destroy_Wall {
+Destroy_Wall() {
     tput cup 36 $1
     printf "${sprite[explosion2]}"
     sleep 0.05
@@ -200,7 +200,7 @@ function Destroy_Wall {
         True if explosion is required
 Destroy_Entity_Doc
 
-function Destroy_Entity {
+Destroy_Entity() {
     local d_col d_row
     if (( $1 > -1 )); then
         if (( ${enemy_row[$1]} < $player_row )); then
@@ -250,7 +250,7 @@ function Destroy_Entity {
         If false, reset the progress bar to zero
 Score_Modifier_Doc
 
-function Score_Modifier {
+Score_Modifier() {
     local               \
         score_col       \
         score_equation  \
@@ -276,7 +276,7 @@ function Score_Modifier {
             read score <<< "$( bc <<< "$score_equation" )"
         # Fallback if bc is not installed
         else
-            score=$(( $score_equation ))
+            (( score = ($score_equation) ))
         fi
     else
         progress_bar=0
@@ -319,7 +319,7 @@ function Score_Modifier {
         If true, reposition player
 Shoot_Doc
 
-function Shoot {
+Shoot() {
     local p
     Score_Modifier true
     if $1; then
@@ -335,7 +335,7 @@ function Shoot {
     fi
     tput cup 34 $player_col
     printf "${sprite[projectile]}"
-    for (( p=33; p>${enemy_row[$2]}; p-- )); do
+    for (( p = 33; p > ${enemy_row[$2]}; p-- )); do
         tput cup $p $player_col
         printf "${sprite[projectile]}"
         tput cup $(( $p + 1 )) $player_col
@@ -350,8 +350,8 @@ function Shoot {
     fi
 }
 
-function Target {
-    word_focus=$(( ${#words[@]} - 1 ))
+Target() {
+    (( word_focus = (${#words[@]} - 1) ))
 
     # Move focussed word to the end of all arays
     words=( ${words[@]:0:$1} ${words[@]:$(( $1 + 1 ))} ${words[$1]} )
@@ -362,7 +362,7 @@ function Target {
     print_left=( ${print_left[@]:0:$1} ${print_left[@]:$(( $1 + 1 ))} ${print_left[$1]} )
 }
 
-function Draw_Target {
+Draw_Target() {
     local word_len=${#words[$word_focus]}
 
     # Set word with matched characters in green
@@ -388,7 +388,7 @@ function Draw_Target {
     fi
 }
 
-function Draw_All {
+Draw_All() {
     local               \
         next_row        \
         wall_capacity   \
@@ -402,7 +402,7 @@ function Draw_All {
         tput cup ${enemy_row[$word_focus]} ${word_col[$word_focus]}
         printf "%$(( ${#words[$word_focus]} + 2 ))s"
     fi
-    for (( l=0; l<${#words[@]}; l++ )); do
+    for (( l = 0; l < ${#words[@]}; l++ )); do
 
         # Save word length to avoid accessing array
         word_len=${#words[$l]}
@@ -424,7 +424,7 @@ function Draw_All {
             unset stun
             next_row=${enemy_row[$l]}
         else
-            next_row=$(( ${enemy_row[$l]} + 1 ))
+            (( next_row = (${enemy_row[$l]} + 1) ))
         fi
 
         # If entity is not on the screen, go to next loop
@@ -451,12 +451,12 @@ function Draw_All {
         if (( $next_row > 35 )); then
             wall_col=${enemy_col[$l]}
             # Wall starts at column 1, so deduct one for zero start array
-            wall_ind=$(( $wall_col - 1 ))
+            (( wall_ind = ($wall_col - 1) ))
             wall_capacity=${wall_log[$wall_ind]}
             if (( $wall_capacity > 0 )); then
                 # Destroy fraction of the wall dependent on word length
                 if (( $word_len < 13 )); then
-                    wall_kill=$(( ($word_len + 2) / 3 ))
+                    (( wall_kill = (($word_len + 2) / 3) ))
                 else
                     wall_kill=4
                 fi
@@ -518,10 +518,12 @@ function Draw_All {
     done
 }
 
-function Set_Default_Text {
+Set_Default_Text() {
     local                                           \
+        cent                                        \
         new_word                                    \
         num_allies=$( ls $lib_dir/allies | wc -l )  \
+        num_file_lines                              \
         offset=$(( $level + 3 ))                    \
         r_index                                     \
         r_total=0                                   \
@@ -533,7 +535,7 @@ function Set_Default_Text {
         word_limit=$(( $level + 4 ))
 
     # Dissipate a percentage chance over the word files from high to low
-    for (( i=$offset; i>($offset - $num_allies); i--)); do
+    for (( i = $offset; i > ($offset - $num_allies); i--)); do
         if (( $i > 0 )); then
             rarity+=( $(( ((i * 100) / $offset) )) )
             (( r_total += ${rarity[@]: -1} ))
@@ -543,24 +545,25 @@ function Set_Default_Text {
     done
 
     # Ratio all percentages under their total
-    for (( r_index=0; r_index<${#rarity[@]}; r_index++ )); do
+    for (( r_index = 0; r_index < ${#rarity[@]}; r_index++ )); do
         if (( ${rarity[$r_index]} > 0 )); then
-            cent=$(( (${rarity[r_index]} * 100) / $r_total ))
-            rarity[$r_index]=$(( $cent + $r_seq_total ))
+            (( cent = ((${rarity[r_index]} * 100) / $r_total) ))
+            (( rarity[$r_index] = ($cent + $r_seq_total) ))
             (( r_seq_total += $cent ))
         fi
     done
 
     # Add new words based on their percentage likelihood
-    for (( new_word=0; new_word<$word_limit; new_word++ )); do
-        random_cent=$(( ($RANDOM % $r_seq_total) + 1 ))
-        for (( choose=0; choose<${#rarity[@]}; choose++ )); do
+    for (( new_word = 0; new_word < $word_limit; new_word++ )); do
+        (( random_cent = (($RANDOM % $r_seq_total) + 1) ))
+        for (( choose = 0; choose < ${#rarity[@]}; choose++ )); do
             if (( $random_cent < ${rarity[choose]} )); then
                 word_file="$lib_dir/allies/$(( $choose + 2 ))_letters.txt"
                 break
             fi
         done
-        random_line=$(( ($RANDOM % $( wc -l < "$word_file" ) ) + 1 ))
+        num_file_lines=$( wc -l < "$word_file" )
+        (( random_line = (($RANDOM % $num_file_lines ) + 1) ))
         prov_words+=( $( sed -n "${random_line}p" < "$word_file" ) )
     done
 }
@@ -572,7 +575,7 @@ function Set_Default_Text {
         Length of new enemy
 Load_Enemies_Doc
 
-function Load_Enemies {
+Load_Enemies() {
     local           \
         e_col       \
         e_row       \
@@ -583,7 +586,7 @@ function Load_Enemies {
     # Add new enemies up to 47 (playable screen width)
     if $1; then
         if (( ${#enemies[@]} < 47 )); then
-            ally_len=$(( ($RANDOM % $2) + 2 ))
+            (( ally_len = (($RANDOM % $2) + 2) ))
             line_max=$( wc -l < "$lib_dir/allies/${ally_len}_letters.txt" )
             prov_words=(
                 $( sed -n "$(( ($RANDOM % $line_max) + 1 ))p" \
@@ -609,7 +612,7 @@ function Load_Enemies {
         fi
     fi
 
-    for (( i=0, e_row=0; i<${#prov_words[@]}; i++, e_row-- )); do
+    for (( i = 0, e_row = 0; i < ${#prov_words[@]}; i++, e_row-- )); do
         word_len=${#prov_words[$i]}
         # If word is longer than 20 characters, delete it and move on
         if (( $word_len > 20 )); then
@@ -617,7 +620,7 @@ function Load_Enemies {
             continue
         fi
 
-        while e_col=$(( ($RANDOM % 46) + 1 )); do
+        while (( e_col = (($RANDOM % 46) + 1) )); do
             [[ " ${enemy_col[@]} " =~ " $e_col " ]] || break
         done
         # If word bleeds over the border, set printing before the ship
@@ -649,7 +652,7 @@ function Load_Enemies {
     printf "${sprite[ship]}"
 }
 
-function Game_Loop {
+Game_Loop() {
     local           \
         draw_exit   \
         hit         \
@@ -674,7 +677,7 @@ function Game_Loop {
             # Clear input buffer
             read -t 0.0001 -n 10000
             # Increase speed
-            speed=$(( 60 - ($level * 2) ))
+            (( speed = (60 - ($level * 2)) ))
             (( $speed < 12 )) && speed=12
             Load_Enemies false
         fi
@@ -713,7 +716,7 @@ function Game_Loop {
                 key=$( tr 'A-Z' 'a-z' <<< "$key1" )
                 if [ -z "$word_focus" ] && ! $hit; then
                     # Loop through all words on screen
-                    for (( w=0; w<${#words[@]}; w++ )); do
+                    for (( w = 0; w < ${#words[@]}; w++ )); do
                         if (( ${enemy_row[$w]} > 0 && ${enemy_row[$w]} < 35 )); then
                             lower_word=$( tr 'A-Z' 'a-z' <<< "${words[$w]}" )
                             # line_of_sight=1
@@ -758,7 +761,7 @@ function Game_Loop {
         if (( $time_taken )); then
             (( time_taken += ($post_time - $pre_time) ))
         else
-            time_taken=$(( $post_time - $pre_time ))
+            (( time_taken = ($post_time - $pre_time) ))
         fi
         if (( $time_taken < $speed )); then
             draw_enemies=false
@@ -771,7 +774,7 @@ function Game_Loop {
 }
 
 # Set blank global variables to allow restarting
-function New_Game {
+New_Game() {
     Clear_Map 37
     # Build wall at full width of the playable area
     wall_log=( $( printf '%.0s4 ' {0..46} ) )
@@ -828,7 +831,7 @@ function New_Game {
             '\e[38;5;128m'
         )
     fi
-    if "$in_cli"; then
+    if $in_cli; then
         score_colours=( ${score_colours[@]:0:2} ${score_colours[@]:3} )
         score_colours+=( '\e[38;5;205m' )
     fi
@@ -853,7 +856,7 @@ function New_Game {
         Variable name to overwrite
 Text_Entry_Doc
 
-function Text_Entry {
+Text_Entry() {
     local               \
         input_string    \
         key
@@ -908,24 +911,24 @@ function Text_Entry {
         Highscore value
 Print_Score_Doc
 
-function Print_Score {
+Print_Score() {
     local           \
         b           \
         hr_score    \
         pad         \
         spacer
     # Make the score human readable
-    for (( b=${#4}; b>0; b-- )); do
+    for (( b = ${#4}; b > 0; b-- )); do
         (( ($b < ${#4}) && ($b % 3 == 0) )) && hr_score+=","
         hr_score+="${4: -b:1}"
     done
     tput cup $1 6
-    pad=$(( 33 - (${#3} + ${#hr_score}) ))
+    (( pad = (33 - (${#3} + ${#hr_score})) ))
     eval printf -v spacer '%.0s.' {1..$pad}
     printf '%-3s%s%s%s\e[0m' "$2" "$3" "$spacer" "$hr_score"
 }
 
-function Show_Scores {
+Show_Scores() {
     local               \
         hs_name         \
         key             \
@@ -956,16 +959,16 @@ function Show_Scores {
     printf "${hs_name^}"
 
     num_scores=$( wc -l < "$hs_log" )
-    for (( ln=0; ln<$num_scores; ln++ )); do
-        line_index=$(( $ln + 1 ))
+    for (( ln = 0; ln < $num_scores; ln++ )); do
+        (( line_index = ($ln + 1) ))
         score_ln=$( sed -n "${line_index}p" "$hs_log" )
         userscores[$ln]=${score_ln/*\,/}
         usernames[$ln]=${score_ln/\,*/}
     done
 
     score_row=8
-    score_max=$(( ${#userscores[@]} < 21 ? ${#userscores[@]} : 20 ))
-    for (( next_score=0; next_score<$score_max; next_score++ )); do
+    (( score_max = (${#userscores[@]} < 21 ? ${#userscores[@]} : 20) ))
+    for (( next_score = 0; next_score < $score_max; next_score++ )); do
         tput cup $score_row 6
         Print_Score $score_row $(( $next_score + 1 )) \
             "${usernames[$next_score]}" ${userscores[$next_score]}
@@ -979,7 +982,7 @@ function Show_Scores {
     done
 }
 
-function Sub_Menu {
+Sub_Menu() {
     local                   \
         allow_change=true   \
         CHEXT               \
@@ -1039,9 +1042,9 @@ function Sub_Menu {
         read -rsn1 -t 0.0001 key3
 
         if [[ "$key3" == "A" ]]; then
-            (( $sm_choose == $cycle_max )) && sm_choose=0 || (( sm_choose++ ))
+            (( $sm_choose == $cycle_max ? sm_choose = 0 : sm_choose++ ))
         elif [[ "$key3" == "B" ]]; then
-            (( $sm_choose == 0 )) && sm_choose=$cycle_max || (( sm_choose-- ))
+            (( $sm_choose == 0 ? sm_choose = $cycle_max : sm_choose-- ))
         fi
 
         if [ -z "$key1" ]; then
@@ -1077,9 +1080,9 @@ function Sub_Menu {
 }
 
 # Similar to Clear_Map in function, but localised to the file structure
-function Clear_List {
+Clear_List() {
     local clean
-    for (( clean=6; $clean<38; clean++ )); do
+    for (( clean = 6; $clean < 38; clean++ )); do
         tput cup $clean 8
         printf '%33s' ''
     done
@@ -1090,7 +1093,7 @@ function Clear_List {
         File to check
 Check_File_Exists_Doc
 
-function Check_File_Exists {
+Check_File_Exists() {
     local           \
         check_file  \
         default_dir
@@ -1111,7 +1114,7 @@ function Check_File_Exists {
         File to be viewed
 Preview_File_Doc
 
-function Preview_File {
+Preview_File() {
     local           \
         file_line   \
         preview_row
@@ -1146,7 +1149,7 @@ function Preview_File {
         True if settings allowed (optional)
 File_Select_Doc
 
-function File_Select {
+File_Select() {
     Clear_List
     unset text_file
     local                                                       \
@@ -1266,11 +1269,11 @@ function File_Select {
             tput cup $(( file_row++ )) 8
             (( $highlighted_line == $line_count )) && printf "\e[7m"
             # Allow only 32 items on screen up to 33 characters
-            item_limit=$(( ${#item} > 32 ? 32 : ${#item} ))
-            line_limit=$(( $item_limit == 33 ? 0 : (33 - $item_limit) ))
+            (( item_limit = (${#item} > 32 ? 32 : ${#item}) ))
+            (( line_limit = ($item_limit == 33 ? 0 : (33 - $item_limit)) ))
             printf "$item_colour%-${item_limit}s\e[0m%-${line_limit}s" "${item:0:32}" "$trail"
             (( line_count++ ))
-        done < <( sed -n "${primary_index},$(( $primary_index + 28 ))p" <<< "$contents" )
+        done < <( sed -n "${primary_index},$(( $primary_index + 28 ))p" "$contents" )
 
         # Take key input
         IFS= read -rsn1 key1
@@ -1309,14 +1312,14 @@ function File_Select {
             if (( $item_selected < 15 )); then
                 new_primary_index=1
             elif (( $item_selected < ($max_items - 14) )); then
-                new_primary_index=$(( $item_selected - 14 ))
+                (( new_primary_index = ($item_selected - 14) ))
             elif (( $item_selected <= $max_items )); then
-                new_primary_index=$(( $max_items - 28 ))
+                (( new_primary_index = ($max_items - 28) ))
             fi
             if (( $new_primary_index != $primary_index )); then
-                if (( $new_primary_index > $primary_index && $highlighted_line != $max_items )); then
+                if (( ($new_primary_index > $primary_index) && ($highlighted_line != $max_items) )); then
                     (( highlighted_line-- ))
-                elif (( $new_primary_index < $primary_index && $highlighted_line != 0 )); then
+                elif (( ($new_primary_index < $primary_index) && ($highlighted_line != 0) )); then
                     (( highlighted_line++ ))
                 fi
                 primary_index=$new_primary_index
@@ -1417,7 +1420,7 @@ function File_Select {
     done
 }
 
-function File_Menu {
+File_Menu() {
     local                           \
         diff_choose=0               \
         diff_cols=( 4 15 28 39 )    \
@@ -1444,7 +1447,7 @@ function File_Menu {
             'CUSTOM'
         )
 
-        for (( diff_index=0; diff_index<${#diff_cols[@]}; diff_index++ )); do
+        for (( diff_index = 0; diff_index < ${#diff_cols[@]}; diff_index++ )); do
             tput cup 1 ${diff_cols[$diff_index]}
             if (( $diff_index == $diff_choose )); then
                 printf "\e[7m${diff_select[$diff_choose]}\e[0m"
@@ -1458,14 +1461,14 @@ function File_Menu {
         read -rsn1 -t 0.0001 key3
 
         if [[ "$key3" == "D" ]]; then
-            (( $diff_choose == 0 )) && diff_choose=3 || (( diff_choose-- ))
+            (( $diff_choose == 0 ? diff_choose = 3 : diff_choose++ ))
         elif [[ "$key3" == "C" ]]; then
-            (( $diff_choose == 3 )) && diff_choose=0 || (( diff_choose++ ))
+            (( $diff_choose == 3 ? diff_choose = 0 : diff_choose-- ))
         fi
         if [ -z "$key1" ]; then
             Clear_Map 38 3
             # Print menu again but fade non-chosen
-            for (( diff_index=0; diff_index<${#diff_cols[@]}; diff_index++ )); do
+            for (( diff_index = 0; diff_index < ${#diff_cols[@]}; diff_index++ )); do
                 tput cup 1 ${diff_cols[$diff_index]}
                 if (( $diff_index != $diff_choose )); then
                     printf "\e[2m${diff_select[$diff_index]}\e[0m"
@@ -1498,7 +1501,7 @@ function File_Menu {
         Starting row (optional)
 Clear_Map_Doc
 
-function Clear_Map {
+Clear_Map() {
     local               \
         clear_row       \
         clear_start=1
@@ -1515,7 +1518,7 @@ function Clear_Map {
         fi
         printf '┌───────────────────────────────────────────────┐\n'
     fi
-    for (( clear_row=$clear_start; clear_row<$1; clear_row++ )); do
+    for (( clear_row = $clear_start; clear_row < $1; clear_row++ )); do
         printf '│                                               │\n'
     done
     printf '└───────────────────────────────────────────────┘'
@@ -1606,9 +1609,9 @@ while true; do
     read -rsn1 -t 0.0001 key3
 
     if [[ "$key3" == "A" ]]; then
-        (( $selected == 3 )) && selected=0 || (( selected++ )) # Up
+        (( $selected == 3 ? selected = 0 : selected++ )) # Up
     elif [[ "$key3" == "B" ]]; then
-        (( $selected == 0 )) && selected=3 || (( selected-- )) # Down
+        (( $selected == 0 ? selected = 3 : selected-- )) # Down
     fi
 
     if [ -z "$key1" ]; then

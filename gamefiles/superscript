@@ -1,8 +1,6 @@
 #!/bin/bash
 
-home_dir=/tmp/Superscript
-
-function Show_Help {
+Show_Help() {
     # Display horizontal line
     seq -s- $(( $( tput cols ) + 1 )) | tr -d '[0-9]'
     cat << ____HELP
@@ -16,13 +14,13 @@ Runs the game in the current terminal window by default
         -u      uninstalls the game
 
         -x      runs in debug mode
-                all output it sent to /tmp/Superscript/debug.log
+                all output it sent to /var/games/superscript/debug.log
 
 NOTES:
         Any errors that show up, please report the contents of
-        /var/games/superscript/error to me at my GitHub page.
+        /var/games/superscript/error.log to me at my GitHub page.
         If the bug is persistent and throws no errors, please use the '-x'
-        option and report the contents of /var/games/superscript/debug instead.
+        option and report the contents of /var/games/superscript/debug.log instead.
 
 Copyright © Ben Pitman
 ____HELP
@@ -30,29 +28,40 @@ ____HELP
     exit 0
 }
 
-function uninstall {
+Uninstall() {
     local PASS
     if [[ "$USER" != "root" ]]; then
         sudo -k
-        printf "Your password is required to uninstall this game.
-                \rLeave blank to cancel uninstall."
+        printf 'Your password is required to uninstall this game.
+                \rLeave blank to cancel uninstall.'
         while read -rsp $'\n> ' PASS; do
             [ -z "$PASS" ] && exit 0
-            ( echo "$PASS" | sudo -Svp '' ) && break
+            if { echo "$PASS" | sudo -Svp ''; } 2>/dev/null; then
+                break
+            else
+                printf 'Error: Invalid Password'
+            fi
         done
         do_sudo=sudo
     else
         do_sudo=
     fi
+    # while read -rp $'\n(Y/N)> ' del_level; do
+    #     [[ "$del_level" == [Nn] ]] && exit 0
+    #
+    # done
     $do_sudo rm -r /usr/local/lib/superscript /var/games/superscript
-    $do_sudo rm /usr/local/bin/superscript-game /usr/local/bin/superscript
+    $do_sudo rm /usr/local/bin/superscript-game     \
+        /usr/local/bin/superscript                  \
+        /usr/share/applications/superscript.desktop \
+        /home/$USER/Desktop/Superscript.desktop 2>/dev/null
     printf 'Uninstallation complete\n'
     exit 0
 }
 
-function Check_Terminal_Size {
+Check_Terminal_Size() {
 
-    (( $( tput cols ) > 48 && $( tput lines ) > 38 )) && return
+    (( $COLUMNS > 48 && $LINES > 38 )) && return
 
     local               \
         max_width=48    \
@@ -74,11 +83,11 @@ function Check_Terminal_Size {
     printf 'Please resize the window to the following grid\n'
     read -rsp "Press enter to continue, and again to refresh or finish"
     tput civis
-    until (( $( tput cols ) > $max_width && $( tput lines ) > $max_height )); do
-        term_width=$(( $( tput cols ) - 1 ))
-        # term_height=$(( $( tput lines ) - 1 ))
-        box_width=$(( $max_width > $term_width ? $term_width : $max_width ))
-        # box_height=$(( $max_height > $term_height ? $term_height : $max_height ))
+    until (( $COLUMNS > $max_width && $LINES > $max_height )); do
+        (( term_width = ($COLUMNS - 1) ))
+        # (( term_height = ($LINES - 1) ))
+        (( box_width = ($max_width > $term_width ? $term_width : $max_width) ))
+        # (( box_height = ($max_height > $term_height ? $term_height : $max_height) ))
         tput clear
         tput cup 0 0
         for (( y=0; y<=$max_height; y++ )); do
@@ -132,7 +141,7 @@ while getopts ":h :g :u :x" arg; do
     case $arg in
         h)  Show_Help;;
         g)  graphical_mode=true;;
-        u)  uninstall;;
+        u)  Uninstall;;
         x)  debug_mode=true;;
         \?) printf "Invalid option -$OPTARG\n";;
     esac
@@ -140,7 +149,7 @@ done
 
 if $graphical_mode; then
     if ! hash gnome-terminal 2>/dev/null; then
-        printf 'gnome-terminal is not installed'
+        printf 'gnome-terminal is not installed\n'
         exit 1
     fi
     gnome-terminal                  \
