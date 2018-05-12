@@ -1,6 +1,6 @@
 #!/bin/bash
 
-bash_version=$( grep -o '^[0-9]' <<< "$BASH_VERSION" )
+bash_version=${BASH_VERSION:0:1}
 if (( $bash_version < 4 )); then
     printf "Incorrect bash version. Please upgrade to 4 or above."
     exit 1

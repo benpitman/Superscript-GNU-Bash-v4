@@ -61,7 +61,7 @@ Uninstall() {
 
 Check_Terminal_Size() {
 
-    (( $COLUMNS > 48 && $LINES > 38 )) && return
+    (( $( tput cols ) > 48 && $( tput lines ) > 38 )) && return
 
     local               \
         max_width=48    \
@@ -83,15 +83,15 @@ Check_Terminal_Size() {
     printf 'Please resize the window to the following grid\n'
     read -rsp "Press enter to continue, and again to refresh or finish"
     tput civis
-    until (( $COLUMNS > $max_width && $LINES > $max_height )); do
-        (( term_width = ($COLUMNS - 1) ))
+    until (( $( tput cols ) > $max_width && $( tput lines ) > $max_height )); do
+        (( term_width = ($( tput cols ) - 1) ))
         # (( term_height = ($LINES - 1) ))
         (( box_width = ($max_width > $term_width ? $term_width : $max_width) ))
         # (( box_height = ($max_height > $term_height ? $term_height : $max_height) ))
         tput clear
         tput cup 0 0
-        for (( y=0; y<=$max_height; y++ )); do
-            for (( x=0; x<=$box_width; x++ )); do
+        for (( y = 0; $y <= $max_height; y++ )); do
+            for (( x = 0; $x <= $box_width; x++ )); do
                 if (( $y == 0 )); then
                     if (( $x == 0 )); then
                         printf '\u250c' # ┌

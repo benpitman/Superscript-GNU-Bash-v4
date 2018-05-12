@@ -350,6 +350,11 @@ Shoot() {
     fi
 }
 
+: <<'Target_Doc'
+    @Param      int    1
+        Position of the targeted word
+Target_Doc
+
 Target() {
     (( word_focus = (${#words[@]} - 1) ))
 
@@ -408,7 +413,8 @@ Draw_All() {
         word_len=${#words[$l]}
 
         # If all enemies are on the screen, load allies randomly
-        if (( ${enemy_row[-1]} > 1 && ($RANDOM % 3) == 0 )); then
+        if (( ($word_focus ? ${enemy_row[-1]} : ${enemy_row[-2]}) > 1 && \
+                ($RANDOM % 3) == 0 )); then
             # If word is between 10 and 12 letters long
             if (( $word_len > 9 && $word_len < 13 )); then
                 # Load a new enemy 2 characters long
@@ -521,6 +527,7 @@ Draw_All() {
 Set_Default_Text() {
     local                                           \
         cent                                        \
+        choose                                      \
         new_word                                    \
         num_allies=$( ls $lib_dir/allies | wc -l )  \
         num_file_lines                              \
@@ -564,7 +571,11 @@ Set_Default_Text() {
         done
         num_file_lines=$( wc -l < "$word_file" )
         (( random_line = (($RANDOM % $num_file_lines ) + 1) ))
-        prov_words+=( $( sed -n "${random_line}p" < "$word_file" ) )
+        word_to_add=$( sed -n "${random_line}p" < "$word_file" )
+        first_letter=${word_to_add:0:1}
+        [[ " ${first_letters[@],,} " =~ " ${first_letter,} " ]] && continue
+        first_letters+=( $first_letter )
+        prov_words+=( $word_to_add )
     done
 }
 
@@ -576,22 +587,27 @@ Set_Default_Text() {
 Load_Enemies_Doc
 
 Load_Enemies() {
-    local           \
-        e_col       \
-        e_row       \
-        line_max    \
-        prov_words  \
-        word_len
+    local                   \
+        e_col               \
+        e_row               \
+        first_letter        \
+        first_letters=()    \
+        line_max            \
+        prov_words          \
+        word_len            \
+        word_to_add
 
     # Add new enemies up to 47 (playable screen width)
     if $1; then
         if (( ${#enemies[@]} < 47 )); then
             (( ally_len = (($RANDOM % $2) + 2) ))
             line_max=$( wc -l < "$lib_dir/allies/${ally_len}_letters.txt" )
-            prov_words=(
-                $( sed -n "$(( ($RANDOM % $line_max) + 1 ))p" \
+            word_to_add=$( sed -n "$(( ($RANDOM % $line_max) + 1 ))p" \
                 "$lib_dir/allies/${ally_len}_letters.txt" )
-            )
+            first_letter=${word_to_add:0:1}
+            [[ " ${first_letters[@],,} " =~ " ${first_letter,} " ]] && continue
+            first_letters+=( $first_letter )
+            prov_words=( $word_to_add )
         else
             return
         fi
@@ -648,6 +664,14 @@ Load_Enemies() {
         fi
         words+=( "${prov_words[$i]}" )
     done
+
+    if $1; then
+        # If new words have been added, retarget the focussed word if there is one
+        if [ -n $word_focus ] && (( $word_focus != (${words[@]} - 1) )); then
+            Target $word_focus
+        fi
+    fi
+
     tput cup $player_row $player_col
     printf "${sprite[ship]}"
 }
@@ -719,27 +743,14 @@ Game_Loop() {
                     for (( w = 0; w < ${#words[@]}; w++ )); do
                         if (( ${enemy_row[$w]} > 0 && ${enemy_row[$w]} < 35 )); then
                             lower_word=$( tr 'A-Z' 'a-z' <<< "${words[$w]}" )
-                            # line_of_sight=1
                             # True if key pressed matches the first character
                             if [[ "$key" == "${lower_word:0:1}" ]]; then
-                                # los_row=${enemy_row[$w]}
-                                # los_col=${word_col[$w]}
-                                # for (( los_word=0; los_word<${#words[@]}; los_word++ )); do
-                                #     (( $los_word==$w )) && continue
-                                #     if (( ${word_col[$los_word]}==$los_col && \
-                                #             ${enemy_row[$los_word]}>$los_row )); then
-                                #         line_of_sight=0
-                                #         break
-                                #     fi
-                                # done
-                                # if (( $line_of_sight )); then
-                                    hit=true
-                                    match=1
-                                    Target "$w"
-                                    stun=$word_focus
-                                    Shoot true $word_focus
-                                    break
-                                # fi
+                                hit=true
+                                match=1
+                                Target "$w"
+                                stun=$word_focus
+                                Shoot true $word_focus
+                                break
                             fi
                         fi
                     done
@@ -1162,7 +1173,7 @@ File_Select() {
         char_lower                                              \
         char_upper                                              \
         contents                                                \
-        current_directory="/home/$USER"                         \
+        current_directory=~                                     \
         ext_char                                                \
         ext_grep                                                \
         file_name                                               \
@@ -1410,9 +1421,9 @@ File_Select() {
             if [ -z "$key2" -a -z "$key3" ] && $allow_options; then
                 Sub_Menu
                 (( $? )) && return 1
-            # If navigation is allowed, go to /home/$USER on home key press
+            # If navigation is allowed, go to ~ on home key press
             elif $allow_navigate && [[ "$key3" = "H" ]]; then
-                current_directory="/home/$USER"
+                current_directory=~
                 change_dir=true
             fi
         fi
