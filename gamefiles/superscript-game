@@ -412,11 +412,12 @@ Draw_All() {
         # Save word length to avoid accessing array
         word_len=${#words[$l]}
 
-        # If all enemies are on the screen, load allies randomly
-        if (( ($word_focus ? ${enemy_row[-1]} : ${enemy_row[-2]}) > 1 && \
-                ($RANDOM % 3) == 0 )); then
-            # If word is between 10 and 12 letters long
-            if (( $word_len > 9 && $word_len < 13 )); then
+
+        # If word is between 10 and 12 letters long
+        if (( $word_len > 9 && $word_len < 13 && (( ($RANDOM % 3) == 0 )); then
+            # If all enemies are on the screen, load allies randomly
+            if [ -n "$word_focus" ] && (( ${enemy_row[-2]} > 1 )) || \
+                    (( ${enemy_row[-1]} > 1 )); then
                 # Load a new enemy 2 characters long
                 Load_Enemies true 2
             # If word is greater than 12 letters long
