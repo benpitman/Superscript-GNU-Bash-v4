@@ -6,9 +6,10 @@ if (( $bash_version < 4 )); then
     exit 1
 fi
 
-if [[ "$USER" != "root" ]]; then
+if [[ "$UID" != "0" ]]; then
     printf "Your password is required to install this game.
-            \rLeave blank to cancel install.\n"
+            \rLeave blank to cancel install.
+            \rRun as root if you don't have a password.\n"
     while true; do
         IFS= read -sp '> ' PASS
         [ -z "$PASS" ] && exit 0
@@ -55,6 +56,7 @@ $do_sudo chmod -R o+wr "$lib_dir" "$log_dir"
 cp -r "$current"/allies "$lib_dir"
 cp -r "$current"/texts "$lib_dir"
 cp -r "$current"/icons "$lib_dir"
+mkdir "$lib_dir/texts/custom"
 $do_sudo cp "$current"/gamefiles/* "$game_dir"
 $do_sudo chmod a+x "$game_dir/superscript-game" "$game_dir/superscript"
 printf 'txt,false,false' > "$log_dir/settings.txt"
@@ -100,7 +102,7 @@ Name=Superscript
 Icon=$lib_dir/icons/superscript-icon-$icon_name.png
 Exec=superscript -g" | $do_sudo tee /usr/share/applications/superscript.desktop 1>/dev/null
 
-if [[ "$USER" == "root" ]]; then
+if [[ "$UID" == "0" ]]; then
     printf  'root does not own a desktop, please enter a home user.
             \rLeave blank to cancel.\n'
     while read -rp "> " username; do

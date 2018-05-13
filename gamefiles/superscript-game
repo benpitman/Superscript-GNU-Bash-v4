@@ -407,22 +407,25 @@ Draw_All() {
         tput cup ${enemy_row[$word_focus]} ${word_col[$word_focus]}
         printf "%$(( ${#words[$word_focus]} + 2 ))s"
     fi
+
     for (( l = 0; l < ${#words[@]}; l++ )); do
 
         # Save word length to avoid accessing array
         word_len=${#words[$l]}
 
-
-        # If word is between 10 and 12 letters long
-        if (( $word_len > 9 && $word_len < 13 && (( ($RANDOM % 3) == 0 )); then
-            # If all enemies are on the screen, load allies randomly
-            if [ -n "$word_focus" ] && (( ${enemy_row[-2]} > 1 )) || \
-                    (( ${enemy_row[-1]} > 1 )); then
-                # Load a new enemy 2 characters long
-                Load_Enemies true 2
-            # If word is greater than 12 letters long
-            elif (( $word_len > 12 )); then
-                Load_Enemies true 4
+        # If all enemies are on the screen
+        if ( [ -n "$word_focus" ] && (( ${enemy_row[@]: -2:1} > 1 )) ) || \
+                (( ${enemy_row[@]: -1:1} > 1 )); thens
+            # A one in three chance
+            if (( ($RANDOM % 3) == 0 )); then
+                # If word is between 10 and 12 letters long
+                if (( $word_len > 9 && $word_len < 13 )); then
+                    # Load a new enemy 2 characters long
+                    Load_Enemies true 2
+                # If word is greater than 12 letters long
+                elif (( $word_len > 12 )); then
+                    Load_Enemies true 4
+                fi
             fi
         fi
 
@@ -1174,7 +1177,7 @@ File_Select() {
         char_lower                                              \
         char_upper                                              \
         contents                                                \
-        current_directory=~                                     \
+        current_directory="$lib_dir/texts/custom"               \
         ext_char                                                \
         ext_grep                                                \
         file_name                                               \
@@ -1285,7 +1288,7 @@ File_Select() {
             (( line_limit = ($item_limit == 33 ? 0 : (33 - $item_limit)) ))
             printf "$item_colour%-${item_limit}s\e[0m%-${line_limit}s" "${item:0:32}" "$trail"
             (( line_count++ ))
-        done < <( sed -n "${primary_index},$(( $primary_index + 28 ))p" "$contents" )
+        done < <( sed -n "${primary_index},$(( $primary_index + 28 ))p" <<< "$contents" )
 
         # Take key input
         IFS= read -rsn1 key1
@@ -1473,9 +1476,9 @@ File_Menu() {
         read -rsn1 -t 0.0001 key3
 
         if [[ "$key3" == "D" ]]; then
-            (( $diff_choose == 0 ? diff_choose = 3 : diff_choose++ ))
+            (( $diff_choose == 0 ? diff_choose = 3 : diff_choose-- ))
         elif [[ "$key3" == "C" ]]; then
-            (( $diff_choose == 3 ? diff_choose = 0 : diff_choose-- ))
+            (( $diff_choose == 3 ? diff_choose = 0 : diff_choose++ ))
         fi
         if [ -z "$key1" ]; then
             Clear_Map 38 3
