@@ -30,7 +30,7 @@ ____HELP
 
 Uninstall() {
     local PASS
-    if [[ "$USER" != "root" ]]; then
+    if [[ "$UID" != "0" ]]; then
         sudo -k
         printf 'Your password is required to uninstall this game.
                 \rLeave blank to cancel uninstall.'
@@ -69,18 +69,23 @@ Check_Terminal_Size() {
 
     printf  'Your terminal is not large enough\n'
     if hash resize 2>/dev/null; then
-        printf 'Would you like to resize it automatically?\n'
+        printf 'Would you like me to attempt to resize it automatically?\n'
         while read -rp 'Y/N> ' term_resize; do
             if [[ "$term_resize" == [Yy] ]]; then
                 resize -s 39 49 &>/dev/null
-                return
+                if (( $( tput cols ) > 48 && $( tput lines ) > 38 )); then
+                    return
+                else
+                    printf 'Resize unsuccessful\n'
+                    break
+                fi
             elif [[ "$term_resize" == [Nn] ]]; then
                 break
             fi
         done
     fi
 
-    printf 'Please resize the window to the following grid\n'
+    printf 'Please resize the window manually to fit the following grid\n'
     read -rsp "Press enter to continue, and again to refresh or finish"
     tput civis
     until (( $( tput cols ) > $max_width && $( tput lines ) > $max_height )); do

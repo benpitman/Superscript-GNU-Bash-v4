@@ -25,8 +25,8 @@ log_dir=/var/games/superscript
 # Debug mode sends STDERR to an error file
 if $2; then
     export PS4='+(${LINENO}) ${FUNCNAME[0]}(): '
-    set -x
     exec 2>$log_dir/debug.log
+    set -x
 else
     exec 2>$log_dir/error.log
 fi
@@ -415,7 +415,7 @@ Draw_All() {
 
         # If all enemies are on the screen
         if ( [ -n "$word_focus" ] && (( ${enemy_row[@]: -2:1} > 1 )) ) || \
-                (( ${enemy_row[@]: -1:1} > 1 )); thens
+                (( ${enemy_row[@]: -1:1} > 1 )); then
             # A one in three chance
             if (( ($RANDOM % 3) == 0 )); then
                 # If word is between 10 and 12 letters long
