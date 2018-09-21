@@ -50,14 +50,14 @@ log_dir='/var/games/superscript'
 hs_dir='/var/games/superscript/highscores'
 current=$( dirname "$( readlink -f "$0" )" )
 
-$do_sudo mkdir -p "$lib_dir" "$hs_dir"
+$do_sudo mkdir -p "$lib_dir" "$hs_dir" 2>/dev/null
 $do_sudo chmod -R o+wr "$lib_dir" "$log_dir"
 
-cp -r "$current"/allies "$lib_dir"
-cp -r "$current"/texts "$lib_dir"
-cp -r "$current"/icons "$lib_dir"
-mkdir "$lib_dir/texts/custom"
-$do_sudo cp "$current"/gamefiles/* "$game_dir"
+cp -rf "$current"/allies "$lib_dir"
+cp -rf "$current"/texts "$lib_dir"
+cp -rf "$current"/icons "$lib_dir"
+mkdir "$lib_dir/texts/custom" 2>/dev/null
+$do_sudo cp -f "$current"/gamefiles/* "$game_dir"
 $do_sudo chmod a+x "$game_dir/superscript-game" "$game_dir/superscript"
 printf 'txt,false,false' > "$log_dir/settings.txt"
 

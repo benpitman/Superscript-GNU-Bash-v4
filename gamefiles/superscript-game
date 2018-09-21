@@ -606,10 +606,11 @@ Load_Enemies() {
         if (( ${#enemies[@]} < 47 )); then
             (( ally_len = (($RANDOM % $2) + 2) ))
             line_max=$( wc -l < "$lib_dir/allies/${ally_len}_letters.txt" )
-            word_to_add=$( sed -n "$(( ($RANDOM % $line_max) + 1 ))p" \
-                "$lib_dir/allies/${ally_len}_letters.txt" )
-            first_letter=${word_to_add:0:1}
-            [[ " ${first_letters[@],,} " =~ " ${first_letter,} " ]] && continue
+            while word_to_add=$( sed -n "$(( ($RANDOM % $line_max) + 1 ))p" \
+                "$lib_dir/allies/${ally_len}_letters.txt" ); do
+                first_letter=${word_to_add:0:1}
+                [[ " ${first_letters[@],,} " =~ " ${first_letter,} " ]] || break
+            done
             first_letters+=( $first_letter )
             prov_words=( $word_to_add )
         else
