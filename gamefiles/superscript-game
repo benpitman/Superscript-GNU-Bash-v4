@@ -692,6 +692,7 @@ Game_Loop() {
         lower_word  \
         post_time   \
         pre_time    \
+        tick        \
         unpause
 
     while true; do
@@ -716,8 +717,17 @@ Game_Loop() {
             draw_exit=$?
             (( $draw_exit > 1 )) && return $draw_exit
         fi
-        pre_time=$( date '+%2N' | sed 's/^0//' )
-        IFS= read -rsn1 -t0.$(( $speed - $time_taken )) key1
+
+        pre_time=$( date '+%2N' )
+        pre_time=${pre_time#0}
+        tick=$(( $speed - $time_taken ))
+        if (( $tick < 0 )); then
+            tick=0
+        elif (( $tick < 10 )); then
+            tick="0$tick"
+        fi
+
+        IFS= read -rsn1 -t0.$tick key1
         read_pid=$?
         IFS= read -rsn1 -t0.0001 key2
         IFS= read -rsn1 -t0.0001 key3
@@ -772,7 +782,8 @@ Game_Loop() {
             # If no hit is made, reset score
             $hit || Score_Modifier false
         fi
-        post_time=$( date '+%2N' | sed 's/^0//' )
+        post_time=$( date '+%2N' )
+        post_time=${post_time#0}
         (( $post_time < $pre_time )) && (( post_time += 100 ))
         if (( $time_taken )); then
             (( time_taken += ($post_time - $pre_time) ))
@@ -851,7 +862,7 @@ New_Game() {
         score_colours=( ${score_colours[@]:0:2} ${score_colours[@]:3} )
         score_colours+=( '\e[38;5;205m' )
     fi
-    score=0
+
     Score_Modifier false
     Game_Loop
     return $?
@@ -1541,7 +1552,7 @@ Clear_Map() {
     tput civis
 }
 
-function Main_Menu {
+Main_Menu() {
     local controls_box
     # Clear screen
     tput clear
